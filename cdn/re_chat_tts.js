@@ -1,6 +1,7 @@
 (function () {
-    const ASSISTANT_ICON = "https://api.dicebear.com/7.x/identicon/svg?seed=IP&backgroundColor=transparent";
-    const USER_ICON = "https://api.dicebear.com/7.x/identicon/svg?seed=IP&backgroundColor=transparent";
+    const ICON_SEED = encodeURIComponent(String(window.ISAI_CLIENT_IP || "IP"));
+    const ASSISTANT_ICON = `https://api.dicebear.com/7.x/identicon/svg?seed=${ICON_SEED}&backgroundColor=transparent`;
+    const USER_ICON = `https://api.dicebear.com/7.x/identicon/svg?seed=${ICON_SEED}&backgroundColor=transparent`;
     const SERVER_I18N = window.ISAI_SERVER_I18N || {};
 
     const DEFAULT_ASSISTANT = {

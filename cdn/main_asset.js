@@ -1198,12 +1198,21 @@ function getActiveLocalModelProfile() {
     return profiles[tier] || null;
 }
 
+function getLocalModelProfileUrl(profile) {
+    if (!profile) return "";
+    if (typeof profile === "string") return String(profile).trim();
+    return String(profile.fallbackUrl || profile.url || profile.modelUrl || "").trim();
+}
+
 function applyLocalModelProfileToConfig() {
     const modelConfig = window.MODEL_CONFIG || {};
     const profile = getActiveLocalModelProfile();
     if (!profile) return null;
     modelConfig.fallback = modelConfig.fallback || {};
-    modelConfig.fallback.url = profile.fallbackUrl || modelConfig.fallback.url;
+    const profileUrl = getLocalModelProfileUrl(profile);
+    if (profileUrl) {
+        modelConfig.fallback.url = profileUrl;
+    }
     if (profile.preferredRuntime) {
         modelConfig.preferredRuntime = profile.preferredRuntime;
     }
@@ -1341,16 +1350,65 @@ function setLocalModelTier(tierKey) {
 window.setLocalModelTier = setLocalModelTier;
 
 // Encoding-safe overrides for local model tier labels/messages.
+function getLocalModelTierLabelFallback(tierKey) {
+    const key = String(tierKey || "").trim().toLowerCase();
+    if (key === "code") return "\ucf54\ub4dc";
+    if (key === "middle") return "\uc911\uac04";
+    if (key === "hard") return "\ud558\ub4dc";
+    return "\ub77c\uc774\ud2b8";
+}
+
+function normalizeLocalModelProfile(tierKey, rawProfile) {
+    const key = String(tierKey || "").trim().toLowerCase();
+    if (!key) return null;
+    const defaultLabel = getLocalModelTierLabelFallback(key);
+
+    if (typeof rawProfile === "string") {
+        return {
+            key,
+            label: defaultLabel,
+            fallbackUrl: String(rawProfile).trim(),
+            preferredRuntime: "wllama"
+        };
+    }
+
+    const source = rawProfile && typeof rawProfile === "object" ? rawProfile : {};
+    const normalized = { ...source };
+    normalized.key = String(normalized.key || key).trim().toLowerCase() || key;
+    normalized.label = String(normalized.label || defaultLabel).trim() || defaultLabel;
+
+    const url = String(normalized.fallbackUrl || normalized.url || normalized.modelUrl || "").trim();
+    if (url) normalized.fallbackUrl = url;
+    if (!normalized.popupSizeText && normalized.sizeText) {
+        normalized.popupSizeText = String(normalized.sizeText).trim();
+    }
+    if (!normalized.preferredRuntime) {
+        normalized.preferredRuntime = "wllama";
+    }
+    return normalized;
+}
+
+function normalizeLocalModelProfiles(rawProfiles) {
+    if (!rawProfiles || typeof rawProfiles !== "object") return {};
+    const normalized = {};
+    Object.keys(rawProfiles).forEach((tierKey) => {
+        const profile = normalizeLocalModelProfile(tierKey, rawProfiles[tierKey]);
+        if (!profile) return;
+        normalized[profile.key] = profile;
+    });
+    return normalized;
+}
+
 function getLocalModelProfiles() {
     const coreProfiles = window.__ISAI_MODEL_CORE_PROFILES || {};
     if (coreProfiles && Object.keys(coreProfiles).length > 0) {
-        return coreProfiles;
+        return normalizeLocalModelProfiles(coreProfiles);
     }
     const configuredProfiles = (window.MODEL_CONFIG && window.MODEL_CONFIG.modelProfiles) || {};
     if (configuredProfiles && Object.keys(configuredProfiles).length > 0) {
-        return configuredProfiles;
+        return normalizeLocalModelProfiles(configuredProfiles);
     }
-    return {
+    return normalizeLocalModelProfiles({
         code: {
             key: "code",
             label: "\ucf54\ub4dc",
@@ -1379,7 +1437,7 @@ function getLocalModelProfiles() {
             popupSizeText: "558MB",
             preferredRuntime: "wllama"
         }
-    };
+    });
 }
 
 function getLocalModelPopupTitle() {
@@ -1499,11 +1557,31 @@ window.setLocalModelTier = setLocalModelTier;
 
 function getLocalModelPopupSizeText(profile) {
     if (!profile) return "429MB";
-    if (profile.popupSizeText) return String(profile.popupSizeText);
+    const sizeCandidates = [profile.popupSizeText, profile.sizeText, profile.downloadSize, profile.size];
+    for (const sizeValue of sizeCandidates) {
+        if (sizeValue) return String(sizeValue);
+    }
     if (profile.key === "code") return "369MB";
     if (profile.key === "middle") return "592MB";
     if (profile.key === "hard") return "558MB";
     return "429MB";
+}
+
+function getLocalModelPopupProfileLabel(profile) {
+    if (profile && profile.label) return String(profile.label);
+    const tier = profile && profile.key ? profile.key : getActiveLocalModelTier();
+    return getLocalModelTierLabelFallback(tier);
+}
+
+function getLocalModelPopupModelName(profile) {
+    if (!profile) return "";
+    const explicitName = String(profile.modelName || profile.name || "").trim();
+    if (explicitName) return explicitName;
+    const url = getLocalModelProfileUrl(profile);
+    if (!url) return "";
+    const path = url.split("?")[0];
+    const fileName = path.substring(path.lastIndexOf("/") + 1);
+    return String(fileName || "").trim();
 }
 
 function getLocalModelPopupTitle() {
@@ -1516,10 +1594,13 @@ function getLocalModelPopupMessage() {
     const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
     const profile = getActiveLocalModelProfile();
     const sizeText = getLocalModelPopupSizeText(profile);
+    const label = getLocalModelPopupProfileLabel(profile);
+    const modelName = getLocalModelPopupModelName(profile);
+    const summary = modelName ? `${modelName} / ${sizeText}` : sizeText;
     if (locale.startsWith("ko")) {
-        return `\ub85c\uceec \ubaa8\ub378(${sizeText})\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \ub85c\uceec \ubaa8\ub4dc\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?`;
+        return `${label} \ub85c\uceec\ubaa8\ub378(${summary})\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?`;
     }
-    return `Download the local model (${sizeText}) to use local mode. Continue?`;
+    return `Download ${label} local model (${summary}) to use local mode. Continue?`;
 }
 
 function handleLocalToggle() {

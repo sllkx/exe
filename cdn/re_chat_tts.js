@@ -143,6 +143,14 @@
     const VOICE_SETTINGS_STORAGE_KEY = "ISAI_VOICE_SETTINGS";
     const ASSISTANT_SETTINGS_STORAGE_KEY = "ISAI_ASSISTANT_SETTINGS";
     const RECENT_MODE_STORAGE_KEY = "ISAI_RECENT_MODES";
+    const TRANSLATE_LANG_STORAGE_KEY = "ISAI_TRANSLATE_LANGS";
+    const TRANSLATE_DEFAULTS = (() => {
+        const defaults = SERVER_I18N.translationDefaults || {};
+        return {
+            left: String(defaults.left || defaults.source || "English"),
+            right: String(defaults.right || defaults.target || "Korean")
+        };
+    })();
     const RECENT_MODE_LIMIT = 3;
     const TRACKED_RECENT_MODES = ["chat", "search", "image", "video", "community", "code", "blog", "voice", "translate", "music"];
     const DEFAULT_TTS_ENGINE = "browser";
@@ -203,6 +211,11 @@
     function imageErrorIconHtml(message) {
         const safeMessage = escapeHtml(String(message ?? "").trim() || "Image generation failed");
         return `<span class="image-error-icon" title="${safeMessage}" aria-label="${safeMessage}"><i class="ri-image-line"></i><i class="ri-close-circle-fill image-error-icon-badge"></i></span>`;
+    }
+
+    function genericErrorIconHtml(message) {
+        const safeMessage = escapeHtml(String(message ?? "").trim() || "Request failed");
+        return `<span class="image-error-icon" title="${safeMessage}" aria-label="${safeMessage}"><i class="ri-error-warning-line"></i><i class="ri-close-circle-fill image-error-icon-badge"></i></span>`;
     }
 
     function loadRecentModes() {
@@ -304,6 +317,222 @@
             return raw.includes("tw") || raw.includes("hk") ? "zh-tw" : "zh";
         }
         return DEFAULT_WELCOME_MESSAGES[primary] ? primary : "en";
+    }
+
+    function getTranslateSelectPair() {
+        return {
+            leftSelect: document.getElementById("trans-select-left"),
+            rightSelect: document.getElementById("trans-select-right")
+        };
+    }
+
+    function getTranslateOptionValues(select) {
+        return Array.from(select?.options || []).map((option) => option.value);
+    }
+
+    function pickTranslateValue(select, preferred, fallback) {
+        const values = getTranslateOptionValues(select);
+        if (!values.length) return "";
+        if (values.includes(preferred)) return preferred;
+        if (values.includes(fallback)) return fallback;
+        return values[0];
+    }
+
+    function pickTranslateAlternative(select, avoidValue) {
+        const values = getTranslateOptionValues(select);
+        if (!values.length) return "";
+        if (avoidValue === "English" && values.includes("Spanish")) return "Spanish";
+        if (avoidValue !== "English" && values.includes("English")) return "English";
+        const alternative = values.find((value) => value !== avoidValue);
+        return alternative || values[0];
+    }
+
+    function loadTranslateLangSelection() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(TRANSLATE_LANG_STORAGE_KEY) || "{}");
+            if (!parsed || typeof parsed !== "object") return {};
+            return parsed;
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function saveTranslateLangSelection(leftValue, rightValue) {
+        try {
+            localStorage.setItem(TRANSLATE_LANG_STORAGE_KEY, JSON.stringify({
+                left: leftValue,
+                right: rightValue
+            }));
+        } catch (error) {}
+    }
+
+    function syncTranslateVoiceRecognition() {
+        if (typeof updateRecognitionLang === "function") {
+            try { updateRecognitionLang(); } catch (error) {}
+        }
+    }
+
+    function syncFlagSelectTrigger(select) {
+        if (!select) return;
+        const root = select.closest(".flag-select");
+        if (!root) return;
+        const trigger = root.querySelector(".flag-select-trigger");
+        const img = root.querySelector(".flag-select-img");
+        const label = root.querySelector(".flag-select-label");
+        const selected = select.options[select.selectedIndex] || select.options[0];
+        if (!selected) return;
+
+        const code = String(selected.dataset.code || selected.textContent || selected.value || "").trim().toUpperCase();
+        const flag = String(selected.dataset.flag || "").trim();
+
+        if (label) label.textContent = code || selected.value;
+        if (img) {
+            img.src = flag || "";
+            img.alt = `${selected.value} flag`;
+        }
+        if (trigger) {
+            trigger.setAttribute("title", selected.value);
+        }
+    }
+
+    function closeAllTranslateMenus(exceptRoot = null) {
+        document.querySelectorAll(".flag-select").forEach((root) => {
+            if (exceptRoot && root === exceptRoot) return;
+            const trigger = root.querySelector(".flag-select-trigger");
+            const menu = root.querySelector(".flag-select-menu");
+            if (menu) menu.classList.add("hidden");
+            if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
+    }
+
+    function renderFlagSelectMenu(select) {
+        const root = select?.closest(".flag-select");
+        if (!root) return;
+        const menu = root.querySelector(".flag-select-menu");
+        if (!menu) return;
+
+        const options = Array.from(select.options || []);
+        menu.innerHTML = options.map((option, index) => {
+            const code = String(option.dataset.code || option.textContent || option.value || "").trim().toUpperCase();
+            const flag = String(option.dataset.flag || "").trim();
+            const isActive = option.value === select.value;
+            return `
+                <button type="button" class="flag-select-item${isActive ? " is-active" : ""}" data-option-index="${index}" role="option" aria-selected="${isActive ? "true" : "false"}">
+                    <img class="flag-select-img" src="${escapeHtml(flag)}" alt="${escapeHtml(option.value)} flag" loading="lazy" decoding="async">
+                    <span class="flag-select-item-code">${escapeHtml(code)}</span>
+                    <span class="flag-select-item-name">${escapeHtml(option.value)}</span>
+                </button>
+            `;
+        }).join("");
+
+        menu.querySelectorAll("[data-option-index]").forEach((button) => {
+            button.addEventListener("click", (event) => {
+                event.preventDefault();
+                const index = Number(button.dataset.optionIndex);
+                if (!Number.isFinite(index) || !options[index]) return;
+                const nextValue = options[index].value;
+                if (select.value !== nextValue) {
+                    select.value = nextValue;
+                    select.dispatchEvent(new Event("change", { bubbles: true }));
+                } else {
+                    syncFlagSelectTrigger(select);
+                }
+                closeAllTranslateMenus();
+            });
+        });
+    }
+
+    function normalizeTranslatePair(changedSide = null) {
+        const { leftSelect, rightSelect } = getTranslateSelectPair();
+        if (!leftSelect || !rightSelect) return;
+
+        if (leftSelect.value === rightSelect.value) {
+            if (changedSide === "left") {
+                rightSelect.value = pickTranslateAlternative(rightSelect, leftSelect.value);
+            } else {
+                leftSelect.value = pickTranslateAlternative(leftSelect, rightSelect.value);
+            }
+        }
+
+        saveTranslateLangSelection(leftSelect.value, rightSelect.value);
+        syncFlagSelectTrigger(leftSelect);
+        syncFlagSelectTrigger(rightSelect);
+        syncTranslateVoiceRecognition();
+    }
+
+    function applyTranslateDefaults(forceServerDefaults = false) {
+        const { leftSelect, rightSelect } = getTranslateSelectPair();
+        if (!leftSelect || !rightSelect) return;
+
+        const saved = loadTranslateLangSelection();
+        const nextLeft = forceServerDefaults
+            ? TRANSLATE_DEFAULTS.left
+            : String(saved.left || TRANSLATE_DEFAULTS.left);
+        const nextRight = forceServerDefaults
+            ? TRANSLATE_DEFAULTS.right
+            : String(saved.right || TRANSLATE_DEFAULTS.right);
+
+        leftSelect.value = pickTranslateValue(leftSelect, nextLeft, TRANSLATE_DEFAULTS.left);
+        rightSelect.value = pickTranslateValue(rightSelect, nextRight, TRANSLATE_DEFAULTS.right);
+
+        normalizeTranslatePair();
+    }
+
+    function bindTranslateSelect(select, side) {
+        if (!select || select.dataset.flagBound === "1") return;
+        select.dataset.flagBound = "1";
+
+        const root = select.closest(".flag-select");
+        const trigger = root ? root.querySelector(".flag-select-trigger") : null;
+        const menu = root ? root.querySelector(".flag-select-menu") : null;
+
+        if (trigger && menu) {
+            trigger.addEventListener("click", (event) => {
+                event.preventDefault();
+                const willOpen = menu.classList.contains("hidden");
+                closeAllTranslateMenus(willOpen ? root : null);
+                if (willOpen) {
+                    renderFlagSelectMenu(select);
+                    menu.classList.remove("hidden");
+                    trigger.setAttribute("aria-expanded", "true");
+                } else {
+                    menu.classList.add("hidden");
+                    trigger.setAttribute("aria-expanded", "false");
+                }
+            });
+        }
+
+        select.addEventListener("change", () => {
+            normalizeTranslatePair(side);
+            renderFlagSelectMenu(select);
+        });
+
+        syncFlagSelectTrigger(select);
+    }
+
+    function initTranslateSelectors() {
+        const { leftSelect, rightSelect } = getTranslateSelectPair();
+        if (!leftSelect || !rightSelect) return;
+
+        applyTranslateDefaults(false);
+        bindTranslateSelect(leftSelect, "left");
+        bindTranslateSelect(rightSelect, "right");
+        renderFlagSelectMenu(leftSelect);
+        renderFlagSelectMenu(rightSelect);
+        syncFlagSelectTrigger(leftSelect);
+        syncFlagSelectTrigger(rightSelect);
+
+        if (!window.__isaiTranslateOutsideClickBound) {
+            window.__isaiTranslateOutsideClickBound = true;
+            document.addEventListener("click", (event) => {
+                const target = event.target;
+                if (target instanceof Element && target.closest(".flag-select")) return;
+                closeAllTranslateMenus();
+            });
+            document.addEventListener("keydown", (event) => {
+                if (event.key === "Escape") closeAllTranslateMenus();
+            });
+        }
     }
 
     function normalizeWelcomeMessage(message, localeHint) {
@@ -554,14 +783,12 @@
 
                 body.className = "chat-entry-body";
 
-                const imageError = role === "error" && isImageErrorMessage(content);
-                bubble.className = imageError ? "chat-bubble-image-error" : "chat-bubble-ai";
-                bubble.innerHTML = imageError ? imageErrorIconHtml(content) : normalizeMessageHtml(role, content);
-                if (role === "error" && !imageError) {
-                    bubble.style.background = "rgba(127, 29, 29, 0.82)";
-                    bubble.style.color = "#fee2e2";
-                    bubble.style.borderColor = "rgba(248, 113, 113, 0.28)";
-                }
+                const isError = role === "error";
+                const imageError = isError && isImageErrorMessage(content);
+                bubble.className = isError ? "chat-bubble-image-error" : "chat-bubble-ai";
+                bubble.innerHTML = isError
+                    ? (imageError ? imageErrorIconHtml(content) : genericErrorIconHtml(content))
+                    : normalizeMessageHtml(role, content);
 
                 body.appendChild(bubble);
                 wrapper.appendChild(body);
@@ -1314,6 +1541,12 @@
             if (mode === "chat") {
                 setTimeout(() => ensureWelcomeMessage(false), 0);
             }
+            if (mode === "translate") {
+                initTranslateSelectors();
+                syncTranslateVoiceRecognition();
+            } else {
+                closeAllTranslateMenus();
+            }
             updateComposerMeta(mode);
             updateTtsUi();
             renderRecentModeActions(mode);
@@ -1377,6 +1610,7 @@
         wrapModeSetters();
         wrapExecuteAction();
         setupTtsControls();
+        initTranslateSelectors();
         ensureWelcomeMessage(true);
         updateComposerMeta(getCurrentMode());
         updateTtsUi();
@@ -1408,6 +1642,9 @@
         if (leftVoiceButton) {
             leftVoiceButton.classList.remove("hidden");
             leftVoiceButton.style.display = "flex";
+        }
+        if (getCurrentMode() === "translate") {
+            syncTranslateVoiceRecognition();
         }
     }
 

@@ -34,6 +34,25 @@ let currentAppQuery = "";
 const STORE_LIMIT = 12;
 const APP_LIMIT = 24;
 
+function sanitizeJsonPayloadText(rawText) {
+    const text = String(rawText ?? "");
+    const withoutBom = text.replace(/^\uFEFF/, "");
+    const start = withoutBom.search(/[{\[]/);
+    if (start > 0) return withoutBom.slice(start).trim();
+    return withoutBom.trim();
+}
+
+function parseJsonTextSafe(rawText) {
+    const cleaned = sanitizeJsonPayloadText(rawText);
+    if (!cleaned) return {};
+    return JSON.parse(cleaned);
+}
+
+async function parseJsonResponseSafe(response) {
+    const rawText = await response.text();
+    return parseJsonTextSafe(rawText);
+}
+
 function filterStore(category, element) {
     document.querySelectorAll(".store-filter-btn").forEach((btn) => btn.classList.remove("active"));
     if (element) element.classList.add("active");
@@ -229,7 +248,7 @@ async function fetchStoreApps(query, append = false) {
 
     try {
         const response = await fetch(url);
-        const json = await response.json();
+        const json = await parseJsonResponseSafe(response);
         const data = json.data ||[];
 
         loader.classList.add("hidden");
@@ -261,7 +280,7 @@ async function loadAppDetails(id) {
     showLoader(true);
     try {
         const response = await fetch(`re_store.php?action=detail_app&id=${id}`);
-        const data = await response.json();
+        const data = await parseJsonResponseSafe(response);
 
         if (data && !data.error) {
             activeApp = data;
@@ -385,7 +404,7 @@ async function executeAction(side = "right") {
                     signal: abortController.signal
                 });
                 
-                const data = await response.json();
+                const data = await parseJsonResponseSafe(response);
 
                 if (data.error === "LIMIT_REACHED") {
                     showToast("Limit reached. Local Translation...");
@@ -403,12 +422,17 @@ async function executeAction(side = "right") {
                     await runLocalInference(localPrompt, (token) => {
                         if (!stopSignal) {
                             localResult += token;
-                            bubble.innerHTML = `<div class="text-lg font-bold text-blue-300 leading-relaxed">${localResult}</div>`;
+                            const plainLocalResult = extractPlainTextLocal(localResult);
+                            bubble.textContent = plainLocalResult;
+                            bubble.style.color = "#111111";
+                            bubble.style.fontWeight = "700";
+                            bubble.style.fontSize = "1.125rem";
+                            bubble.style.lineHeight = "1.65";
                             scrollBottom();
                         }
                     });
                     
-                    if (!stopSignal) speakText(localResult, speechLang);
+                    if (!stopSignal) speakText(extractPlainTextLocal(localResult), speechLang);
                 } else if (data.error) {
                     appendMsg("error", data.error);
                 } else {
@@ -422,9 +446,14 @@ async function executeAction(side = "right") {
                         resultObj.text = data.response;
                     }
                     
-                    appendMsg("ai", `<div class="text-lg font-bold text-blue-300 leading-relaxed">${resultObj.text}</div>`);
+                    const translatedText = extractPlainTextLocal(resultObj.text);
+                    const translatedBubble = appendMsg("ai", translatedText);
+                    if (translatedBubble) {
+                        translatedBubble.style.color = "#111111";
+                        translatedBubble.style.fontWeight = "700";
+                    }
                     const speechLang = langMap[targetLang] || "en-US";
-                    speakText(resultObj.text, speechLang);
+                    speakText(translatedText, speechLang);
                 }
             } else if (currentMode === "video") {
                 let prompt = userText;
@@ -437,7 +466,7 @@ async function executeAction(side = "right") {
                     signal: abortController.signal
                 });
                 
-                const data = await response.json();
+                const data = await parseJsonResponseSafe(response);
                 
                 if (data.error) {
                     appendMsg("error", "Video Error: " + data.error);
@@ -458,7 +487,7 @@ async function executeAction(side = "right") {
                     signal: abortController.signal
                 });
                 
-                const data = await response.json();
+                const data = await parseJsonResponseSafe(response);
                 
                 if (data.error) {
                     appendMsg("error", "Image Error: " + data.error);
@@ -485,7 +514,7 @@ async function executeAction(side = "right") {
                 const rawText = await response.text();
                 let data = {};
                 try {
-                    data = rawText ? JSON.parse(rawText) : {};
+                    data = parseJsonTextSafe(rawText);
                 } catch (e) {
                     console.error("Search Data JSON 파싱 에러:", rawText);
                     throw new Error("검색 서버로부터 올바른 데이터를 받지 못했습니다.");
@@ -506,7 +535,7 @@ async function executeAction(side = "right") {
                     const rawSynthText = await synthResponse.text();
                     let synthData = {};
                     try {
-                        synthData = rawSynthText ? JSON.parse(rawSynthText) : {};
+                        synthData = parseJsonTextSafe(rawSynthText);
                     } catch (e) {
                         console.error("Search Synthesis JSON 파싱 에러:", rawSynthText);
                         throw new Error("검색 요약 서버로부터 올바른 데이터를 받지 못했습니다.");
@@ -601,7 +630,7 @@ async function executeAction(side = "right") {
                         signal: abortController.signal
                     });
                     
-                    const data = await response.json();
+                    const data = await parseJsonResponseSafe(response);
                     
                     if (data.error === "LIMIT_REACHED") {
                         showToast("Limit reached. Local Model...");
@@ -809,7 +838,7 @@ async function fetchApps(query = "", append = false) {
         });
 
         if (response.ok) {
-            const data = await response.json();
+            const data = await parseJsonResponseSafe(response);
 
             if (data && data.length > 0) {
                 // 불필요한 애니메이션 관련 클래스 토글 제거
@@ -1062,7 +1091,7 @@ function setVoiceState(side, state) {
             btnVoiceIcon.className = "ri-voiceprint-line text-lg text-white animate-mic-breath";
         }
     } else if (state === "processing") {
-        iconLeft.className = "ri-voiceprint-line text-lg text-white animate-spin";
+        iconLeft.className = "ri-voiceprint-line text-lg text-white";
         btnLeft.style.backgroundColor = "rgba(255,255,255,0.16)";
         btnLeft.style.color = "#ffffff";
         btnLeft.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.14), 0 10px 24px rgba(0,0,0,0.26)";
@@ -1073,7 +1102,7 @@ function setVoiceState(side, state) {
             btnVoice.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.14), 0 10px 24px rgba(0,0,0,0.26)";
         }
         if (btnVoiceIcon) {
-            btnVoiceIcon.className = "ri-voiceprint-line text-lg text-white animate-spin";
+            btnVoiceIcon.className = "ri-voiceprint-line text-lg text-white";
         }
     }
 }
@@ -1154,20 +1183,20 @@ function getLocalModelProfiles() {
         light: {
             key: "light",
             label: "라이트",
-            fallbackUrl: "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/LFM2.5-350M-Q4_0.gguf",
+            fallbackUrl: "",
             popupSizeText: "257MB",
             preferredRuntime: "wllama"
         },
         middle: {
             key: "middle",
             label: "중간",
-            fallbackUrl: "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/LFM2.5-350M-Q6_K.gguf",
+            fallbackUrl: "",
             preferredRuntime: "wllama"
         },
         hard: {
             key: "hard",
             label: "하드",
-            fallbackUrl: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-IQ4_XS.gguf",
+            fallbackUrl: "",
             preferredRuntime: "wllama"
         }
     };
@@ -1290,7 +1319,9 @@ function renderLocalModelTierSelector() {
         const button = document.createElement("button");
         button.type = "button";
         button.className = `local-model-tier-btn${tier === activeTier ? " active" : ""}`;
-        button.textContent = profile.label || tier;
+        const displayLabel = getLocalizedLocalModelTierLabel(tier);
+        button.textContent = displayLabel;
+        button.title = displayLabel;
         button.dataset.tier = tier;
         button.setAttribute("aria-pressed", tier === activeTier ? "true" : "false");
         button.addEventListener("click", (event) => {
@@ -1344,7 +1375,7 @@ function setLocalModelTier(tierKey) {
     const activeProfile = getActiveLocalModelProfile();
     if (activeProfile && typeof showToast === "function") {
         const readySuffix = isModelDownloaded ? " (다운로드됨)" : "";
-        showToast(`${activeProfile.label || nextTier} 모델 선택${readySuffix}`);
+        showToast(`${getLocalizedLocalModelTierLabel(nextTier)} 모델 선택${readySuffix}`);
     }
 }
 window.setLocalModelTier = setLocalModelTier;
@@ -1352,10 +1383,32 @@ window.setLocalModelTier = setLocalModelTier;
 // Encoding-safe overrides for local model tier labels/messages.
 function getLocalModelTierLabelFallback(tierKey) {
     const key = String(tierKey || "").trim().toLowerCase();
-    if (key === "code") return "\ucf54\ub4dc";
-    if (key === "middle") return "\uc911\uac04";
-    if (key === "hard") return "\ud558\ub4dc";
-    return "\ub77c\uc774\ud2b8";
+    if (key === "code") return "Code";
+    if (key === "middle") return "Middle";
+    if (key === "hard") return "Hard";
+    return "Light";
+}
+
+function getLocalModelTierLocale() {
+    const serverLocale = window.ISAI_SERVER_I18N && window.ISAI_SERVER_I18N.locale;
+    const candidate = String(serverLocale || window.LANG || document.documentElement.lang || navigator.language || "en").toLowerCase();
+    return candidate.split("-")[0];
+}
+
+function getLocalizedLocalModelTierLabel(tierKey) {
+    const key = String(tierKey || "").trim().toLowerCase();
+    const locale = getLocalModelTierLocale();
+    const labels = {
+        ko: { code: "코드", light: "라이트", middle: "중간", hard: "하드" },
+        ja: { code: "コード", light: "ライト", middle: "ミドル", hard: "ハード" },
+        zh: { code: "代码", light: "轻量", middle: "中等", hard: "高性能" },
+        es: { code: "Código", light: "Ligero", middle: "Medio", hard: "Avanzado" },
+        pt: { code: "Código", light: "Leve", middle: "Médio", hard: "Pesado" },
+        hi: { code: "कोड", light: "लाइट", middle: "मिड", hard: "हार्ड" },
+        en: { code: "Code", light: "Light", middle: "Middle", hard: "Hard" }
+    };
+    const table = labels[locale] || labels.en;
+    return table[key] || labels.en[key] || getLocalModelTierLabelFallback(key);
 }
 
 function normalizeLocalModelProfile(tierKey, rawProfile) {
@@ -1399,7 +1452,28 @@ function normalizeLocalModelProfiles(rawProfiles) {
     return normalized;
 }
 
+function getBundledLocalModelProfilesRaw() {
+    const provider = window.getIsaiLocalModelProfiles;
+    if (typeof provider === "function") {
+        try {
+            const provided = provider();
+            if (provided && typeof provided === "object" && Object.keys(provided).length > 0) {
+                return provided;
+            }
+        } catch (error) {}
+    }
+    const bundled = window.__ISAI_LOCAL_MODEL_PROFILES;
+    if (bundled && typeof bundled === "object" && Object.keys(bundled).length > 0) {
+        return bundled;
+    }
+    return null;
+}
+
 function getLocalModelProfiles() {
+    const bundledProfiles = getBundledLocalModelProfilesRaw();
+    if (bundledProfiles && Object.keys(bundledProfiles).length > 0) {
+        return normalizeLocalModelProfiles(bundledProfiles);
+    }
     const coreProfiles = window.__ISAI_MODEL_CORE_PROFILES || {};
     if (coreProfiles && Object.keys(coreProfiles).length > 0) {
         return normalizeLocalModelProfiles(coreProfiles);
@@ -1412,28 +1486,28 @@ function getLocalModelProfiles() {
         code: {
             key: "code",
             label: "\ucf54\ub4dc",
-            fallbackUrl: "https://huggingface.co/lmstudio-community/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-0.5B-Instruct-Q3_K_L.gguf",
+            fallbackUrl: "",
             popupSizeText: "369MB",
             preferredRuntime: "wllama"
         },
         light: {
             key: "light",
             label: "\ub77c\uc774\ud2b8",
-            fallbackUrl: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf",
+            fallbackUrl: "",
             popupSizeText: "429MB",
             preferredRuntime: "wllama"
         },
         middle: {
             key: "middle",
             label: "\uc911\uac04",
-            fallbackUrl: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-UD-IQ3_XXS.gguf",
+            fallbackUrl: "",
             popupSizeText: "592MB",
             preferredRuntime: "wllama"
         },
         hard: {
             key: "hard",
             label: "\ud558\ub4dc",
-            fallbackUrl: "https://huggingface.co/unsloth/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q3_K_S.gguf",
+            fallbackUrl: "",
             popupSizeText: "558MB",
             preferredRuntime: "wllama"
         }
@@ -1494,13 +1568,17 @@ function getLocalModelTierUserSetKey() {
     return "ISAI_LOCAL_MODEL_TIER_USER_SET_V1";
 }
 
-function ensureDefaultLocalModelTierForActivation() {
+function ensureDefaultLocalModelTierForActivation(forceLightOnActivation) {
     const profiles = getLocalModelProfiles();
     const tierKey = getLocalModelTierStorageKey();
     const userSetKey = getLocalModelTierUserSetKey();
     const hasUserSelection = localStorage.getItem(userSetKey) === "true";
     const storedTier = String(localStorage.getItem(tierKey) || "").trim().toLowerCase();
     const fallbackTier = profiles.light ? "light" : getDefaultLocalModelTier();
+    if (forceLightOnActivation && profiles[fallbackTier]) {
+        localStorage.setItem(tierKey, fallbackTier);
+        return fallbackTier;
+    }
     if (!hasUserSelection || !profiles[storedTier]) {
         localStorage.setItem(tierKey, fallbackTier);
     }
@@ -1536,7 +1614,7 @@ function setLocalModelTier(tierKey) {
     const activeProfile = getActiveLocalModelProfile();
     if (activeProfile && typeof showToast === "function") {
         const readySuffix = isModelDownloaded ? " (\ub2e4\uc6b4\ub85c\ub4dc\ub428)" : "";
-        showToast(`${activeProfile.label || nextTier} \ubaa8\ub378 \uc120\ud0dd${readySuffix}`);
+        showToast(`${getLocalizedLocalModelTierLabel(nextTier)} \ubaa8\ub378 \uc120\ud0dd${readySuffix}`);
     }
 
     if (isModelDownloaded) {
@@ -1568,9 +1646,8 @@ function getLocalModelPopupSizeText(profile) {
 }
 
 function getLocalModelPopupProfileLabel(profile) {
-    if (profile && profile.label) return String(profile.label);
     const tier = profile && profile.key ? profile.key : getActiveLocalModelTier();
-    return getLocalModelTierLabelFallback(tier);
+    return getLocalizedLocalModelTierLabel(tier);
 }
 
 function getLocalModelPopupModelName(profile) {
@@ -1604,7 +1681,9 @@ function getLocalModelPopupMessage() {
 }
 
 function handleLocalToggle() {
-    ensureDefaultLocalModelTierForActivation();
+    const downloadedForCurrentTier = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
+    const willActivate = !(downloadedForCurrentTier && isLocalActive);
+    ensureDefaultLocalModelTierForActivation(willActivate);
     applyLocalModelProfileToConfig();
     isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
 
@@ -1828,6 +1907,21 @@ async function runLocalInference(promptArr, callback) {
 
 function showLoader(show) {
     const overlay = document.getElementById("loader-overlay");
+    if (!overlay) return;
+
+    const effectiveMode = String(
+        currentMode
+        || (document.body && document.body.getAttribute("data-ui-mode"))
+        || "chat"
+    ).toLowerCase();
+    const suppressBlockingOverlayModes = new Set(["chat", "search", "code", "blog", "voice", "translate"]);
+    const shouldSuppressOverlay = suppressBlockingOverlayModes.has(effectiveMode);
+
+    if (shouldSuppressOverlay) {
+        overlay.classList.remove("active");
+        return;
+    }
+
     if (show) {
         overlay.classList.add("active");
     } else {
@@ -1853,6 +1947,17 @@ function decodeHtmlEntitiesLocal(value) {
     const textarea = document.createElement("textarea");
     textarea.innerHTML = String(value ?? "");
     return textarea.value;
+}
+
+function extractPlainTextLocal(value) {
+    const normalized = String(value ?? "")
+        .replace(/<think>[\s\S]*?(<\/think>|$)/gi, " ")
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+    const holder = document.createElement("div");
+    holder.innerHTML = normalized;
+    return String(holder.textContent || holder.innerText || normalized).replace(/\s+/g, " ").trim();
 }
 
 function sanitizeAiHtmlLocal(value) {
@@ -1891,6 +1996,16 @@ function imageErrorIconHtmlLocal(message) {
     return `<span class="image-error-icon" title="${safeMessage}" aria-label="${safeMessage}"><i class="ri-image-line"></i><i class="ri-close-circle-fill image-error-icon-badge"></i></span>`;
 }
 
+function genericErrorIconHtmlLocal(message) {
+    const safeMessage = String(message ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .trim() || "Request failed";
+    return `<span class="image-error-icon" title="${safeMessage}" aria-label="${safeMessage}"><i class="ri-error-warning-line"></i><i class="ri-close-circle-fill image-error-icon-badge"></i></span>`;
+}
+
 function appendMsg(role, content) {
     const chatBox = document.getElementById("chat-box");
     
@@ -1916,6 +2031,9 @@ function appendMsg(role, content) {
             bubble.style.color = "#111827";
             bubble.style.border = "1px solid rgba(15, 23, 42, 0.12)";
             bubble.style.boxShadow = "0 14px 30px rgba(15, 23, 42, 0.10)";
+        } else if (currentMode === "translate") {
+            bubble.style.backgroundColor = "#ffffff";
+            bubble.style.color = "#111111";
         }
     }
 
@@ -1926,14 +2044,15 @@ function appendMsg(role, content) {
             .replace(/>/g, "&gt;");
         bubble.innerHTML = safeContent.replace(/\n/g, "<br>");
     } else {
-        const imageError = role === "error" && isImageErrorMessageLocal(content);
-        if (imageError) {
+        const isError = role === "error";
+        const imageError = isError && isImageErrorMessageLocal(content);
+        if (isError) {
             bubble.className = "chat-bubble-image-error";
             bubble.style.backgroundColor = "";
             bubble.style.color = "";
             bubble.style.border = "";
             bubble.style.boxShadow = "";
-            bubble.innerHTML = imageErrorIconHtmlLocal(content);
+            bubble.innerHTML = imageError ? imageErrorIconHtmlLocal(content) : genericErrorIconHtmlLocal(content);
         } else {
             bubble.innerHTML = formatAiBubbleContent(content);
         }
@@ -2201,7 +2320,7 @@ window.openFullEditor = function(blockId) {
         const codePanelMaxHeight = vw <= 900 ? "360px" : "520px";
         if (codeEditor) codeEditor.value = text;
         if (codeTabs) {
-            codeTabs.innerHTML = '<button class="px-3 py-1.5 text-xs rounded-md transition font-mono font-bold">Current Code</button>';
+            codeTabs.innerHTML = '<button type="button" class="code-tab-btn active" title="Current Code"><span class="code-tab-icon"><i class="ri-code-s-slash-line"></i></span><span class="code-tab-label">CODE</span></button>';
         }
 
         if (typeof window.syncInlineCodePanel === "function") {
@@ -2440,7 +2559,7 @@ async function processBlogImages(element) {
         
         try {
             const res = await fetch(`?action=pixabay_search&q=${encodeURIComponent(keyword)}`);
-            const data = await res.json();
+            const data = await parseJsonResponseSafe(res);
             
             if (data.hits && data.hits.length > 0) {
                 const hit = data.hits[0];

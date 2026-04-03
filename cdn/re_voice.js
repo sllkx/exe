@@ -20,6 +20,26 @@ function stopSupertonicPlayback() {
     return;
 }
 
+async function parseJsonResponseSafeVoice(response) {
+    if (typeof parseJsonResponseSafe === 'function') {
+        return parseJsonResponseSafe(response);
+    }
+    const rawText = await response.text();
+    const cleaned = String(rawText || '').replace(/^\uFEFF/, '').trimStart();
+    return cleaned ? JSON.parse(cleaned) : {};
+}
+
+function extractPlainTextVoice(value) {
+    const normalized = String(value || '')
+        .replace(/<think>[\s\S]*?(<\/think>|$)/gi, ' ')
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+    const holder = document.createElement('div');
+    holder.innerHTML = normalized;
+    return String(holder.textContent || holder.innerText || normalized).replace(/\s+/g, ' ').trim();
+}
+
 function normalizeIsaiVoiceLang(langCode) {
     const raw = String(langCode || '').trim();
     const fallback = (typeof LANG !== 'undefined' && LANG === 'ko') ? 'ko-KR' : (navigator.language || 'en-US');
@@ -240,7 +260,7 @@ async function performVoiceConversationRequest(text) {
             method: 'POST',
             body: JSON.stringify({ prompt: finalPrompt, history: history, system_prompt: sysPrompt })
         });
-        const data = await response.json();
+        const data = await parseJsonResponseSafeVoice(response);
 
         if (!data || !data.response) {
             throw new Error(data && data.error ? data.error : 'Voice chat failed');
@@ -300,7 +320,7 @@ async function performTranslationRequest(text, side) {
             method: 'POST',
             body: JSON.stringify({ text: userText, target_lang: targetLangName })
         });
-        const data = await res.json();
+        const data = await parseJsonResponseSafeVoice(res);
 
         let resultText = data.response || '';
         try {
@@ -309,12 +329,17 @@ async function performTranslationRequest(text, side) {
             resultText = parsed.text || resultText;
         } catch (error) {}
 
+        const plainTranslatedText = extractPlainTextVoice(resultText);
         if (typeof appendMsg === 'function') {
-            appendMsg('ai', `<div class="text-lg font-bold text-blue-300 leading-relaxed">${resultText}</div>`);
+            const translatedBubble = appendMsg('ai', plainTranslatedText);
+            if (translatedBubble) {
+                translatedBubble.style.color = '#111111';
+                translatedBubble.style.fontWeight = '700';
+            }
         }
 
         const targetCode = langMap[targetLangName] || 'en-US';
-        speakText(resultText, targetCode);
+        speakText(plainTranslatedText, targetCode);
     } catch (error) {
         if (typeof console !== 'undefined' && console.error) console.error(error);
         isVoiceProcessing = false;
@@ -421,7 +446,7 @@ function updateSubmitIcon(state, side = 'right') {
         icon.className = 'ri-voiceprint-line text-lg text-white animate-mic-breath';
         btn.style.backgroundColor = '#ef4444';
     } else if (state === 'processing') {
-        icon.className = 'ri-voiceprint-line text-lg text-white animate-spin';
+        icon.className = 'ri-voiceprint-line text-lg text-white';
         btn.style.backgroundColor = '';
     } else {
         icon.className = 'ri-voiceprint-line text-lg text-white';

@@ -54,11 +54,18 @@ select option {
     scrollbar-color: #333333 #121212;
 }
 
+        html,
+        body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100%;
+            height: 100%;
+        }
+
         body { 
             background: radial-gradient(circle at center, #262626 0%, #000000 100%) !important;
             background-attachment: fixed !important;
             color: white !important;
-            margin: 0;
             width: 100%;
             height: 100vh; 
             display: flex;
@@ -149,6 +156,154 @@ select option {
             outline: none;
             cursor: pointer;
             padding-right: 2px;
+        }
+        .flag-select {
+            position: relative;
+            padding: 0 !important;
+            min-width: 46px;
+            width: 46px;
+            overflow: visible;
+        }
+        .flag-select-trigger {
+            width: 100%;
+            height: 100%;
+            border: 0;
+            background: #000000;
+            color: #ffffff;
+            border-radius: 9999px;
+            padding: 0 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .flag-select-trigger:focus-visible {
+            outline: 2px solid rgba(255, 255, 255, 0.24);
+            outline-offset: 1px;
+        }
+        .flag-select-img {
+            width: 16px;
+            height: 16px;
+            border-radius: 9999px;
+            object-fit: cover;
+            flex: 0 0 16px;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.18);
+        }
+        .flag-select-label {
+            display: none !important;
+        }
+        .flag-select-caret {
+            font-size: 12px !important;
+            color: #9ca3af !important;
+            margin-left: 1px;
+        }
+        .flag-select-native {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            overflow: hidden !important;
+        }
+        .flag-select-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            right: auto;
+            transform: translateX(-50%);
+            background: #0f1012;
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 12px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+            padding: 4px 3px;
+            z-index: 360;
+            max-height: 210px;
+            width: 40px;
+            min-width: 40px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .flag-select-item {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            color: rgba(255,255,255,0.9);
+            border-radius: 9px;
+            height: 32px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            cursor: pointer;
+            text-align: left;
+            font-size: 11px;
+            line-height: 1;
+            appearance: none;
+            -webkit-appearance: none;
+            outline: none;
+            box-shadow: none !important;
+            transform: none !important;
+            clip-path: none !important;
+        }
+        .flag-select-item:hover,
+        .flag-select-item.is-active {
+            background: transparent !important;
+            box-shadow: none !important;
+            transform: none !important;
+            outline: none !important;
+            border: 0 !important;
+        }
+        .flag-select-item:focus,
+        .flag-select-item:focus-visible,
+        .flag-select-item:active {
+            background: transparent !important;
+            box-shadow: none !important;
+            transform: none !important;
+            outline: none !important;
+            border: 0 !important;
+        }
+        .flag-select-item-code {
+            display: none !important;
+        }
+        .flag-select-item-name {
+            display: none !important;
+        }
+        .flag-select-menu {
+            scrollbar-color: rgba(255,255,255,0.22) transparent;
+        }
+        .flag-select-menu::-webkit-scrollbar {
+            width: 4px;
+        }
+        .flag-select-menu::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .flag-select-menu::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.22);
+            border-radius: 9999px;
+        }
+        #community-tools > label,
+        #community-tools > div {
+            background: #000000 !important;
+            border-color: rgba(255,255,255,0.2) !important;
+        }
+        #chat-box .text-blue-300 {
+            color: #111111 !important;
+        }
+        #chat-box .translate-result,
+        #chat-box .translate-result * {
+            color: #111111 !important;
+        }
+        #btn-submit-left i.animate-spin,
+        #btn-voice i.animate-spin,
+        #icon-submit-left.animate-spin {
+            animation: none !important;
+            -webkit-animation: none !important;
         }
         #local-model-tier-wrapper {
             max-width: min(58vw, 240px);
@@ -2082,6 +2237,7 @@ select option {
             width: 48px;
             min-width: 48px;
             height: 38px;
+            min-height: 38px;
             padding: 0;
             border-radius: 14px;
             display: inline-flex;
@@ -2089,6 +2245,7 @@ select option {
             align-items: center;
             justify-content: center;
             gap: 3px;
+            box-sizing: border-box;
             color: rgba(255,255,255,0.46);
             background: rgba(255,255,255,0.03);
             border: 1px solid rgba(255,255,255,0.05);
@@ -2111,14 +2268,14 @@ select option {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.05);
+            background: transparent;
+            border: 1px solid transparent;
             font-size: 11px;
             color: inherit;
         }
         .code-tab-btn.active .code-tab-icon {
-            background: rgba(17,17,17,0.08);
-            border-color: rgba(17,17,17,0.06);
+            background: transparent;
+            border-color: transparent;
         }
         .code-tab-label {
             font-size: 8px;

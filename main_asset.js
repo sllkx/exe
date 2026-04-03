@@ -8,6 +8,8 @@ let musicModel = null;
 let currentMode = "chat";
 let chatHistory =[];
 let wllama = null;
+let localEngine = null;
+let localRuntime = localStorage.getItem((window.MODEL_CONFIG && window.MODEL_CONFIG.runtimeKey) || "ISAI_LOCAL_MODEL_RUNTIME_V1") || null;
 let isModelDownloaded = false;
 let isModelLoaded = false;
 let isLocalActive = false;
@@ -75,61 +77,116 @@ function saveCurrentApp() {
     }
 }
 
-function toggleStoreMenu() {
-    const storePanel = document.getElementById('store-panel');
-    const appPanel = document.getElementById('app-container');
-    const iconMenu = document.getElementById('icon-menu');
-    const btnMenu = document.getElementById('btn-menu');
-    const btnApp = document.getElementById('btn-app');
+function applyStoreMenuState(open) {
+    if (typeof window.setStoreMenuState === "function") {
+        window.setStoreMenuState(open);
+        return;
+    }
 
-    // 앱스토어를 열 때, 숏컷 패널이 열려있다면 닫기
-    if (!storePanel.classList.contains('open')) {
-        if (appPanel.classList.contains('open')) {
-            appPanel.classList.remove('open');
-            if (btnApp) btnApp.classList.remove('active', 'text-white', 'bg-[#262626]');
+    const shouldOpen = !!open;
+    const chatStack = document.getElementById("chat-main-stack");
+    const topZone = document.getElementById("top-zone");
+    const storePanel = document.getElementById("store-panel");
+    const appPanel = document.getElementById("app-container");
+    const btnMenu = document.getElementById("btn-menu");
+    const iconMenu = document.getElementById("icon-menu");
+    const promptInput = document.getElementById("prompt-input");
+
+    if (chatStack) chatStack.classList.toggle("menu-mode", shouldOpen);
+    if (topZone) topZone.classList.toggle("menu-mode", shouldOpen);
+    if (storePanel) storePanel.classList.toggle("open", shouldOpen);
+    if (appPanel) appPanel.classList.remove("open");
+    if (chatStack) {
+        if (shouldOpen) {
+            chatStack.style.setProperty("height", "100%", "important");
+            chatStack.style.setProperty("min-height", "0", "important");
+            chatStack.style.setProperty("max-height", "100%", "important");
+        } else {
+            chatStack.style.removeProperty("height");
+            chatStack.style.removeProperty("min-height");
+            chatStack.style.removeProperty("max-height");
         }
-        
-        storePanel.classList.add('open');
-        isMenuOpen = true;
-        if (iconMenu) iconMenu.className = 'ri-draggable text-xl'; // 아이콘 변경
-        if (btnMenu) btnMenu.classList.add('text-white');
-        fetchStoreApps("", false);
-    } else {
-        storePanel.classList.remove('open');
-        isMenuOpen = false;
-        if (btnMenu) btnMenu.classList.remove('text-white');
+    }
+    if (topZone) {
+        if (shouldOpen) {
+            topZone.style.setProperty("display", "none", "important");
+            topZone.style.setProperty("height", "0", "important");
+            topZone.style.setProperty("min-height", "0", "important");
+            topZone.style.setProperty("max-height", "0", "important");
+            topZone.style.setProperty("flex", "0 0 auto", "important");
+            topZone.style.setProperty("padding", "0", "important");
+            topZone.style.setProperty("margin", "0", "important");
+            topZone.style.setProperty("overflow", "hidden", "important");
+            topZone.style.setProperty("visibility", "hidden", "important");
+            topZone.style.setProperty("opacity", "0", "important");
+        } else {
+            topZone.style.removeProperty("display");
+            topZone.style.removeProperty("height");
+            topZone.style.removeProperty("min-height");
+            topZone.style.removeProperty("max-height");
+            topZone.style.removeProperty("flex");
+            topZone.style.removeProperty("padding");
+            topZone.style.removeProperty("margin");
+            topZone.style.removeProperty("overflow");
+            topZone.style.removeProperty("visibility");
+            topZone.style.removeProperty("opacity");
+        }
+    }
+    if (btnMenu) {
+        btnMenu.classList.toggle("menu-open", shouldOpen);
+        btnMenu.classList.toggle("text-white", shouldOpen);
+    }
+    if (iconMenu) {
+        iconMenu.className = shouldOpen ? "ri-draggable text-xl" : "ri-draggable text-lg";
+    }
+
+    isMenuOpen = shouldOpen;
+    window.isMenuOpen = shouldOpen;
+
+    if (shouldOpen && typeof fetchStoreApps === "function") {
+        const query = promptInput ? promptInput.value.trim() : "";
+        fetchStoreApps(query, false);
+    }
+    if (typeof window.__applyMobileChatRailSafety === "function") {
+        [0, 40, 120, 260].forEach((delay) => {
+            setTimeout(window.__applyMobileChatRailSafety, delay);
+        });
     }
 }
 
+function toggleStoreMenu() {
+    const chatStack = document.getElementById("chat-main-stack");
+    const shouldOpen = !(chatStack && chatStack.classList.contains("menu-mode"));
+    if (shouldOpen && typeof window.currentMode !== "undefined" && window.currentMode !== "chat" && typeof window.setMode === "function") {
+        window.setMode("chat");
+    }
+    applyStoreMenuState(shouldOpen);
+}
+
 function toggleAppPanel() {
-    const storePanel = document.getElementById('store-panel');
     const appPanel = document.getElementById('app-container');
     const btnApp = document.getElementById('btn-app');
-    const iconMenu = document.getElementById('icon-menu');
-    const btnMenu = document.getElementById('btn-menu');
 
-    // 숏컷을 열 때, 앱스토어가 열려있다면 닫기
     if (!appPanel.classList.contains('open')) {
-        if (storePanel.classList.contains('open')) {
-            storePanel.classList.remove('open');
-            isMenuOpen = false;
-            if (btnMenu) btnMenu.classList.remove('text-white');
-            if (iconMenu) iconMenu.className = 'ri-draggable text-lg';
-        }
-
+        applyStoreMenuState(false);
         appPanel.classList.add('open');
+        appPanel.style.display = "block";
         if (btnApp) btnApp.classList.add('active', 'text-white', 'bg-[#262626]');
         setMode('app');
         fetchApps(document.getElementById('prompt-input').value.trim());
     } else {
         appPanel.classList.remove('open');
+        appPanel.style.display = "none";
         if (btnApp) btnApp.classList.remove('active', 'text-white', 'bg-[#262626]');
     }
 }
 
 function handleInput(element) {
     element.style.height = "auto";
-    element.style.height = element.scrollHeight + "px";
+    const maxHeight = window.innerWidth <= 900 ? 64 : 72;
+    const nextHeight = Math.min(element.scrollHeight, maxHeight);
+    element.style.height = nextHeight + "px";
+    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
 
     if (isMenuOpen) {
         const query = element.value.trim();
@@ -232,7 +289,7 @@ async function loadAppDetails(id) {
 async function executeAction(side = "right") {
     if (typeof side !== "string") side = "right";
 
-    if (currentMode === "voice" || currentMode === "translate") {
+    if (side === "left" && currentMode === "voice") {
         if (isVoiceProcessing) return;
         
         if (isVoiceListening) {
@@ -264,6 +321,11 @@ async function executeAction(side = "right") {
             }
         }, 100);
         return;
+    }
+
+    if (side !== "left" && currentMode === "voice" && isVoiceListening) {
+        isVoiceListening = false;
+        stopVoiceMode(false);
     }
 
     const inputElement = document.getElementById("prompt-input");
@@ -491,9 +553,14 @@ async function executeAction(side = "right") {
                 
                 if (activeApp) {
                     if (activeApp.system_prompt) sysPrompt = activeApp.system_prompt;
-                    if (activeApp.category === "Code") {
-                        finalPrompt = `System: ${sysPrompt}\n\nUser Request: ${userText}`;
-                    }
+                }
+
+                if (typeof window.buildIsaiSystemPrompt === "function") {
+                    sysPrompt = window.buildIsaiSystemPrompt(sysPrompt);
+                }
+
+                if (activeApp && activeApp.category === "Code") {
+                    finalPrompt = `System: ${sysPrompt}\n\nUser Request: ${userText}`;
                 }
                 
                 if (currentMode === "blog") {
@@ -530,7 +597,7 @@ async function executeAction(side = "right") {
                 } else {
                     const response = await fetch("?action=ai_chat", {
                         method: "POST",
-                        body: JSON.stringify({ prompt: finalPrompt, history: currentHistory }),
+                        body: JSON.stringify({ prompt: finalPrompt, history: currentHistory, system_prompt: sysPrompt }),
                         signal: abortController.signal
                     });
                     
@@ -644,7 +711,7 @@ async function executeAction(side = "right") {
                 if (typeof clearCommFile === "function") clearCommFile();
 
                 if (postData.id) {
-                    window.location.href = "view/" + postData.id + "&type=forum";
+                    window.location.href = "https://isai.kr/view/" + postData.id;
                 } else {
                     if (typeof switchTab === "function") switchTab("forum");
                     if (typeof loadData === "function") loadData("forum", true);
@@ -658,6 +725,34 @@ async function executeAction(side = "right") {
             showLoader(false);
         }
     }
+}
+
+function triggerVoiceButton() {
+    const voiceToolbarButton = document.getElementById("btn-voice");
+    if (currentMode === "voice") {
+        stopVoiceMode(true);
+        if (typeof setMode === "function") {
+            setMode("chat");
+        } else {
+            setVoiceState("left", "idle");
+        }
+        if (voiceToolbarButton) voiceToolbarButton.classList.remove("voice-armed", "voice-recording", "voice-processing");
+        if (typeof showToast === "function") showToast("Voice conversation off");
+        return;
+    }
+
+    try { stopVoiceMode(true); } catch (error) {}
+    translationSide = "left";
+    if (typeof setMode === "function") {
+        setMode("voice");
+    }
+
+    setVoiceState("left", "processing");
+    if (typeof showToast === "function") showToast("Voice conversation on");
+
+    setTimeout(() => {
+        executeAction("left");
+    }, 120);
 }
 
 function renderStoreItems(apps, container) {
@@ -757,6 +852,10 @@ function createAppItem(app, isClone = false) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+    applyLocalModelProfileToConfig();
+    renderLocalModelTierSelector();
+    observeLocalModelTierVisibility();
+    syncLocalModelTierVisibility(currentMode);
     initCheckModel();
     fetchApps("");
     renderFixedApps();
@@ -770,14 +869,18 @@ window.addEventListener("DOMContentLoaded", () => {
     const btnChat = document.getElementById("btn-chat");
     if (btnChat) btnChat.classList.add("active");
 
-    const storePanel = document.getElementById("store-panel");
-    if (storePanel) {
-        storePanel.addEventListener("scroll", () => {
-            if (storePanel.scrollTop + storePanel.clientHeight >= storePanel.scrollHeight - 50 && hasMoreStoreApps && !isStoreLoading && isMenuOpen) {
+    const handleStoreScroll = (target) => {
+        if (!target) return;
+        target.addEventListener("scroll", () => {
+            if (target.scrollTop + target.clientHeight >= target.scrollHeight - 50 && hasMoreStoreApps && !isStoreLoading && isMenuOpen) {
                 fetchStoreApps(currentStoreQuery, true);
             }
         });
-    }
+    };
+    const storePanel = document.getElementById("store-panel");
+    const storeGrid = document.getElementById("store-grid");
+    handleStoreScroll(storePanel);
+    handleStoreScroll(storeGrid);
 
     const appContainer = document.getElementById("app-container");
 
@@ -890,45 +993,93 @@ function setVoiceState(side, state) {
     const btnRight = document.getElementById("btn-submit");
     const iconLeft = document.getElementById("icon-submit-left");
     const iconRight = document.getElementById("icon-submit");
+    const btnVoice = document.getElementById("btn-voice");
+    const btnVoiceIcon = btnVoice ? btnVoice.querySelector("i") : null;
 
-    if (!btnLeft || !btnRight) return;
+    if (!btnLeft || !iconLeft) return;
 
-    btnLeft.className = "w-9 h-9 items-center justify-center flex-shrink-0 mr-2 transition-all duration-300 rounded-full";
-    btnRight.className = "btn-submit w-9 h-9 flex items-center justify-center flex-shrink-0 transition-all duration-300";
-    btnLeft.style.backgroundColor = "rgba(128,128,128,0.1)";
-    btnRight.style.backgroundColor = "";
-    btnRight.style.color = "";
+    btnLeft.className = "btn-icon voice-toggle-btn transition-all duration-300";
+    if (btnRight && btnRight.closest("#chat-input-actions")) {
+        btnRight.className = "input-action-btn";
+    } else if (btnRight) {
+        btnRight.className = "btn-submit w-9 h-9 flex items-center justify-center flex-shrink-0 transition-all duration-300";
+    }
+    btnLeft.style.display = "flex";
+    btnLeft.style.backgroundColor = "rgba(255,255,255,0.10)";
+    btnLeft.style.color = "#ffffff";
+    btnLeft.style.boxShadow = "none";
     btnLeft.style.opacity = "1";
-    btnRight.style.opacity = "1";
     btnLeft.style.pointerEvents = "auto";
-    btnRight.style.pointerEvents = "auto";
-    btnLeft.style.display = currentMode !== "translate" ? "none" : "flex";
+    btnLeft.setAttribute("aria-pressed", state === "idle" ? "false" : "true");
+    btnLeft.setAttribute("title", state === "idle" ? "Voice Conversation" : "Voice Conversation Active");
+    if (btnRight) {
+        btnRight.style.backgroundColor = "";
+        btnRight.style.color = "";
+        btnRight.style.opacity = "1";
+        btnRight.style.pointerEvents = "auto";
+    }
 
-    iconLeft.className = "ri-voiceprint-line text-lg";
-    iconRight.className = "ri-voiceprint-line text-lg";
+    iconLeft.className = "ri-mic-line text-lg text-white";
+    if (iconRight) iconRight.className = "ri-arrow-up-s-line text-[14px]";
+    if (btnVoice) {
+        btnVoice.classList.remove("voice-armed", "voice-recording", "voice-processing");
+        btnVoice.style.backgroundColor = "";
+        btnVoice.style.color = "";
+        btnVoice.style.boxShadow = "";
+        btnVoice.style.transform = "";
+        btnVoice.setAttribute("aria-pressed", state === "idle" ? "false" : "true");
+    }
+    if (btnVoiceIcon) {
+        btnVoiceIcon.className = "ri-mic-2-line text-lg";
+    }
+
+    if (state === "idle" && currentMode === "voice") {
+        btnLeft.style.backgroundColor = "rgba(255,255,255,0.14)";
+        btnLeft.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.10), 0 10px 24px rgba(0,0,0,0.22)";
+        if (btnVoice) {
+            btnVoice.classList.add("voice-armed");
+            btnVoice.style.backgroundColor = "rgba(255,255,255,0.12)";
+            btnVoice.style.color = "#ffffff";
+            btnVoice.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.10), 0 10px 24px rgba(0,0,0,0.22)";
+        }
+    }
 
     if (state === "idle") return;
 
-    const activeBtn = side === "left" ? btnLeft : btnRight;
-    const activeIcon = side === "left" ? iconLeft : iconRight;
-    const inactiveBtn = side === "left" ? btnRight : btnLeft;
-
-    inactiveBtn.style.opacity = "0.3";
-    inactiveBtn.style.pointerEvents = "none";
-
     if (state === "recording") {
-        activeIcon.className = "ri-voiceprint-line text-lg animate-mic-breath";
-        activeBtn.style.backgroundColor = "#ef4444";
-        activeBtn.style.color = "white";
+        iconLeft.className = "ri-voiceprint-line text-lg text-white animate-mic-breath";
+        btnLeft.style.backgroundColor = "#ef4444";
+        btnLeft.style.color = "white";
+        btnLeft.style.boxShadow = "0 0 0 4px rgba(239,68,68,0.18), 0 10px 24px rgba(239,68,68,0.30)";
+        if (btnVoice) {
+            btnVoice.classList.add("voice-recording");
+            btnVoice.style.backgroundColor = "#ef4444";
+            btnVoice.style.color = "#ffffff";
+            btnVoice.style.boxShadow = "0 0 0 4px rgba(239,68,68,0.18), 0 10px 24px rgba(239,68,68,0.30)";
+            btnVoice.style.transform = "scale(1.03)";
+        }
+        if (btnVoiceIcon) {
+            btnVoiceIcon.className = "ri-voiceprint-line text-lg text-white animate-mic-breath";
+        }
     } else if (state === "processing") {
-        activeIcon.className = "ri-voiceprint-line text-lg animate-spin";
-        activeBtn.style.backgroundColor = "";
-        activeBtn.style.color = "";
+        iconLeft.className = "ri-voiceprint-line text-lg text-white animate-spin";
+        btnLeft.style.backgroundColor = "rgba(255,255,255,0.16)";
+        btnLeft.style.color = "#ffffff";
+        btnLeft.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.14), 0 10px 24px rgba(0,0,0,0.26)";
+        if (btnVoice) {
+            btnVoice.classList.add("voice-processing");
+            btnVoice.style.backgroundColor = "rgba(255,255,255,0.16)";
+            btnVoice.style.color = "#ffffff";
+            btnVoice.style.boxShadow = "0 0 0 1px rgba(255,255,255,0.14), 0 10px 24px rgba(0,0,0,0.26)";
+        }
+        if (btnVoiceIcon) {
+            btnVoiceIcon.className = "ri-voiceprint-line text-lg text-white animate-spin";
+        }
     }
 }
 
 function updateSubmitIcon(state, side = "right") {
-    setVoiceState(side, state === "mic" || state === "default" ? "idle" : state);
+    setVoiceState("left", state === "mic" || state === "default" ? "idle" : state);
 }
 
 function showPopup(title, msg, confirmCallback) {
@@ -962,22 +1113,11 @@ function closePopup() {
     document.getElementById("modal-layer").classList.remove("show");
 }
 
-function handleLocalToggle() {
-    if (isModelDownloaded) {
-        isLocalActive = !isLocalActive;
-        if (!isLocalActive || isModelLoaded) {
-            updateLocalBtnState();
-        } else {
-            startDownload();
-        }
-    } else {
-        showPopup(T.popup_title_wifi, T.popup_msg_wifi, startDownload);
-    }
-}
-
 function updateLocalBtnState() {
     const btn = document.getElementById("btn-download");
+    if (!btn) return;
     const icon = btn.querySelector("i");
+    if (!icon) return;
 
     if (isLocalActive) {
         btn.classList.add("text-green-400", "active");
@@ -992,40 +1132,544 @@ function updateLocalBtnState() {
         icon.className = "ri-download-line text-xl";
         btn.style.color = "rgba(255,255,255,0.3)";
     }
+    if (typeof syncLocalModelTierVisibility === "function") {
+        syncLocalModelTierVisibility();
+    }
+}
+
+function getLocalModelTierStorageKey() {
+    return (window.MODEL_CONFIG && window.MODEL_CONFIG.modelTierKey) || "ISAI_LOCAL_MODEL_TIER_V1";
+}
+
+function getLocalModelProfiles() {
+    const coreProfiles = window.__ISAI_MODEL_CORE_PROFILES || {};
+    if (coreProfiles && Object.keys(coreProfiles).length > 0) {
+        return coreProfiles;
+    }
+    const configuredProfiles = (window.MODEL_CONFIG && window.MODEL_CONFIG.modelProfiles) || {};
+    if (configuredProfiles && Object.keys(configuredProfiles).length > 0) {
+        return configuredProfiles;
+    }
+    return {
+        light: {
+            key: "light",
+            label: "라이트",
+            fallbackUrl: "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/LFM2.5-350M-Q4_0.gguf",
+            popupSizeText: "257MB",
+            preferredRuntime: "wllama"
+        },
+        middle: {
+            key: "middle",
+            label: "중간",
+            fallbackUrl: "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/LFM2.5-350M-Q6_K.gguf",
+            preferredRuntime: "wllama"
+        },
+        hard: {
+            key: "hard",
+            label: "하드",
+            fallbackUrl: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-IQ4_XS.gguf",
+            preferredRuntime: "wllama"
+        }
+    };
+}
+
+function getDefaultLocalModelTier() {
+    const profiles = getLocalModelProfiles();
+    const configuredDefault = String((window.MODEL_CONFIG && window.MODEL_CONFIG.defaultModelTier) || "").trim().toLowerCase();
+    if (configuredDefault && profiles[configuredDefault]) return configuredDefault;
+    if (profiles.light) return "light";
+    const keys = Object.keys(profiles);
+    return keys.length > 0 ? keys[0] : "light";
+}
+
+function getActiveLocalModelTier() {
+    const profiles = getLocalModelProfiles();
+    const storageKey = getLocalModelTierStorageKey();
+    const storedTier = String(localStorage.getItem(storageKey) || "").trim().toLowerCase();
+    if (storedTier && profiles[storedTier]) return storedTier;
+    const fallbackTier = getDefaultLocalModelTier();
+    localStorage.setItem(storageKey, fallbackTier);
+    return fallbackTier;
+}
+
+function getActiveLocalModelProfile() {
+    const profiles = getLocalModelProfiles();
+    const tier = getActiveLocalModelTier();
+    return profiles[tier] || null;
+}
+
+function applyLocalModelProfileToConfig() {
+    const modelConfig = window.MODEL_CONFIG || {};
+    const profile = getActiveLocalModelProfile();
+    if (!profile) return null;
+    modelConfig.fallback = modelConfig.fallback || {};
+    modelConfig.fallback.url = profile.fallbackUrl || modelConfig.fallback.url;
+    if (profile.preferredRuntime) {
+        modelConfig.preferredRuntime = profile.preferredRuntime;
+    }
+    window.MODEL_CONFIG = modelConfig;
+    return profile;
+}
+window.applyLocalModelProfileToConfig = applyLocalModelProfileToConfig;
+
+function getLocalDownloadStorageKey() {
+    const baseKey = (window.MODEL_CONFIG && window.MODEL_CONFIG.storageKey) || "ISAI_MODEL_DOWNLOADED";
+    const tier = getActiveLocalModelTier();
+    return `${baseKey}__${tier}`;
+}
+
+function getLocalRuntimeStorageKey() {
+    return (window.MODEL_CONFIG && window.MODEL_CONFIG.runtimeKey) || "ISAI_LOCAL_MODEL_RUNTIME_V1";
+}
+
+function getLocalModelPopupTitle() {
+    const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
+    if (locale.startsWith("ko")) return "로컬 모델 다운로드";
+    return "Download Local Model";
+}
+
+function getLocalModelPopupMessage() {
+    const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
+    const profile = getActiveLocalModelProfile();
+    if (locale.startsWith("ko")) {
+        if (profile && profile.key === "light") {
+            const sizeText = profile.popupSizeText || "257MB";
+            return `LFM2.5 350M 모델(${sizeText})을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?`;
+        }
+        if (profile && profile.key === "middle") {
+            return "LFM2.5 350M Q6_K 모델을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?";
+        }
+        if (profile && profile.key === "hard") {
+            return "Qwen3 0.6B IQ4_XS 모델을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?";
+        }
+        return "로컬 모델을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?";
+    }
+    if (profile && profile.key === "light") {
+        const sizeText = profile.popupSizeText || "257MB";
+        return `Download LFM2.5 350M (${sizeText}) for local mode. Continue?`;
+    }
+    if (profile && profile.key === "middle") {
+        return "Download LFM2.5 350M Q6_K for local mode. Continue?";
+    }
+    if (profile && profile.key === "hard") {
+        return "Download Qwen3 0.6B IQ4_XS for local mode. Continue?";
+    }
+    return "Download the local model for offline mode. Continue?";
+}
+
+function syncLocalModelTierVisibility(mode) {
+    const wrapper = document.getElementById("local-model-tier-wrapper");
+    if (!wrapper) return;
+    const effectiveMode = String(mode || (document.body && document.body.getAttribute("data-ui-mode")) || currentMode || "chat").toLowerCase();
+    const shouldShow = (effectiveMode === "chat" || effectiveMode === "code") && !!isLocalActive;
+    wrapper.style.display = shouldShow ? "block" : "none";
+}
+window.syncLocalModelTierVisibility = syncLocalModelTierVisibility;
+
+function renderLocalModelTierSelector() {
+    const wrapper = document.getElementById("local-model-tier-wrapper");
+    const list = document.getElementById("local-model-tier-list");
+    if (!wrapper || !list) return;
+
+    const profiles = getLocalModelProfiles();
+    const activeTier = getActiveLocalModelTier();
+    const orderedTiers = getOrderedLocalModelTierKeys().filter((tier) => !!profiles[tier]);
+
+    list.innerHTML = "";
+    orderedTiers.forEach((tier) => {
+        const profile = profiles[tier] || {};
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `local-model-tier-btn${tier === activeTier ? " active" : ""}`;
+        button.textContent = profile.label || tier;
+        button.dataset.tier = tier;
+        button.setAttribute("aria-pressed", tier === activeTier ? "true" : "false");
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setLocalModelTier(tier);
+        });
+        list.appendChild(button);
+    });
+
+    syncLocalModelTierVisibility();
+}
+
+function observeLocalModelTierVisibility() {
+    if (window.__localModelTierModeObserverBound) return;
+    const body = document.body;
+    if (!body) return;
+    const observer = new MutationObserver(() => {
+        syncLocalModelTierVisibility();
+    });
+    observer.observe(body, { attributes: true, attributeFilter: ["data-ui-mode"] });
+    window.__localModelTierModeObserverBound = true;
+}
+
+function setLocalModelTier(tierKey) {
+    const profiles = getLocalModelProfiles();
+    const nextTier = String(tierKey || "").trim().toLowerCase();
+    if (!profiles[nextTier]) return;
+
+    const prevTier = getActiveLocalModelTier();
+    if (prevTier === nextTier) {
+        renderLocalModelTierSelector();
+        return;
+    }
+
+    const wasLocalActive = !!isLocalActive;
+    localStorage.setItem(getLocalModelTierStorageKey(), nextTier);
+    localStorage.setItem(getLocalModelTierUserSetKey(), "true");
+    applyLocalModelProfileToConfig();
+
+    isLocalActive = wasLocalActive;
+    isModelLoaded = false;
+    localEngine = null;
+    wllama = null;
+    setLocalRuntimeState(null);
+    isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
+
+    updateLocalBtnState();
+    renderLocalModelTierSelector();
+
+    const activeProfile = getActiveLocalModelProfile();
+    if (activeProfile && typeof showToast === "function") {
+        const readySuffix = isModelDownloaded ? " (다운로드됨)" : "";
+        showToast(`${activeProfile.label || nextTier} 모델 선택${readySuffix}`);
+    }
+}
+window.setLocalModelTier = setLocalModelTier;
+
+// Encoding-safe overrides for local model tier labels/messages.
+function getLocalModelProfiles() {
+    const coreProfiles = window.__ISAI_MODEL_CORE_PROFILES || {};
+    if (coreProfiles && Object.keys(coreProfiles).length > 0) {
+        return coreProfiles;
+    }
+    const configuredProfiles = (window.MODEL_CONFIG && window.MODEL_CONFIG.modelProfiles) || {};
+    if (configuredProfiles && Object.keys(configuredProfiles).length > 0) {
+        return configuredProfiles;
+    }
+    return {
+        code: {
+            key: "code",
+            label: "\ucf54\ub4dc",
+            fallbackUrl: "https://huggingface.co/lmstudio-community/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-0.5B-Instruct-Q3_K_L.gguf",
+            popupSizeText: "369MB",
+            preferredRuntime: "wllama"
+        },
+        light: {
+            key: "light",
+            label: "\ub77c\uc774\ud2b8",
+            fallbackUrl: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf",
+            popupSizeText: "429MB",
+            preferredRuntime: "wllama"
+        },
+        middle: {
+            key: "middle",
+            label: "\uc911\uac04",
+            fallbackUrl: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-UD-IQ3_XXS.gguf",
+            popupSizeText: "592MB",
+            preferredRuntime: "wllama"
+        },
+        hard: {
+            key: "hard",
+            label: "\ud558\ub4dc",
+            fallbackUrl: "https://huggingface.co/unsloth/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q3_K_S.gguf",
+            popupSizeText: "558MB",
+            preferredRuntime: "wllama"
+        }
+    };
+}
+
+function getLocalModelPopupTitle() {
+    const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
+    if (locale.startsWith("ko")) return "\ub85c\uceec \ubaa8\ub378 \ub2e4\uc6b4\ub85c\ub4dc";
+    return "Download Local Model";
+}
+
+function getLocalModelPopupMessage() {
+    const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
+    const profile = getActiveLocalModelProfile();
+    if (locale.startsWith("ko")) {
+        if (profile && profile.key === "light") {
+            const sizeText = profile.popupSizeText || "257MB";
+            return `LFM2.5 350M (${sizeText}) \ubaa8\ub378\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \ub85c\uceec \ubaa8\ub4dc\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?`;
+        }
+        if (profile && profile.key === "middle") {
+            return "LFM2.5 350M Q6_K \ubaa8\ub378\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \ub85c\uceec \ubaa8\ub4dc\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?";
+        }
+        if (profile && profile.key === "hard") {
+            return "Qwen3 0.6B IQ4_XS \ubaa8\ub378\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \ub85c\uceec \ubaa8\ub4dc\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?";
+        }
+        return "\ub85c\uceec \ubaa8\ub378\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \uc624\ud504\ub77c\uc778 \ubaa8\ub4dc\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?";
+    }
+    if (profile && profile.key === "light") {
+        const sizeText = profile.popupSizeText || "257MB";
+        return `Download LFM2.5 350M (${sizeText}) for local mode. Continue?`;
+    }
+    if (profile && profile.key === "middle") {
+        return "Download LFM2.5 350M Q6_K for local mode. Continue?";
+    }
+    if (profile && profile.key === "hard") {
+        return "Download Qwen3 0.6B IQ4_XS for local mode. Continue?";
+    }
+    return "Download the local model for offline mode. Continue?";
+}
+
+function getOrderedLocalModelTierKeys() {
+    const profiles = getLocalModelProfiles();
+    const preferredOrder = ["code", "light", "middle", "hard"];
+    const ordered = preferredOrder.filter((tier) => !!profiles[tier]);
+    return ordered.length > 0 ? ordered : ["light"];
+}
+
+function getNextLocalModelTier(currentTier) {
+    const ordered = getOrderedLocalModelTierKeys();
+    const current = String(currentTier || "").trim().toLowerCase();
+    const currentIndex = ordered.indexOf(current);
+    if (currentIndex < 0) return ordered[0];
+    return ordered[(currentIndex + 1) % ordered.length];
+}
+
+function getLocalModelTierUserSetKey() {
+    return "ISAI_LOCAL_MODEL_TIER_USER_SET_V1";
+}
+
+function ensureDefaultLocalModelTierForActivation() {
+    const profiles = getLocalModelProfiles();
+    const tierKey = getLocalModelTierStorageKey();
+    const userSetKey = getLocalModelTierUserSetKey();
+    const hasUserSelection = localStorage.getItem(userSetKey) === "true";
+    const storedTier = String(localStorage.getItem(tierKey) || "").trim().toLowerCase();
+    const fallbackTier = profiles.light ? "light" : getDefaultLocalModelTier();
+    if (!hasUserSelection || !profiles[storedTier]) {
+        localStorage.setItem(tierKey, fallbackTier);
+    }
+    return getActiveLocalModelTier();
+}
+
+function setLocalModelTier(tierKey) {
+    const profiles = getLocalModelProfiles();
+    const nextTier = String(tierKey || "").trim().toLowerCase();
+    if (!profiles[nextTier]) return;
+
+    const prevTier = getActiveLocalModelTier();
+    if (prevTier === nextTier) {
+        renderLocalModelTierSelector();
+        return;
+    }
+
+    const wasLocalActive = !!isLocalActive;
+    localStorage.setItem(getLocalModelTierStorageKey(), nextTier);
+    localStorage.setItem(getLocalModelTierUserSetKey(), "true");
+    applyLocalModelProfileToConfig();
+
+    isLocalActive = wasLocalActive;
+    isModelLoaded = false;
+    localEngine = null;
+    wllama = null;
+    setLocalRuntimeState(null);
+    isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
+
+    updateLocalBtnState();
+    renderLocalModelTierSelector();
+
+    const activeProfile = getActiveLocalModelProfile();
+    if (activeProfile && typeof showToast === "function") {
+        const readySuffix = isModelDownloaded ? " (\ub2e4\uc6b4\ub85c\ub4dc\ub428)" : "";
+        showToast(`${activeProfile.label || nextTier} \ubaa8\ub378 \uc120\ud0dd${readySuffix}`);
+    }
+
+    if (isModelDownloaded) {
+        if (wasLocalActive) {
+            startDownload();
+        }
+        return;
+    }
+
+    // On tier change, start downloading the newly selected model immediately.
+    isLocalActive = true;
+    updateLocalBtnState();
+    renderLocalModelTierSelector();
+    syncLocalModelTierVisibility();
+    startDownload();
+}
+window.setLocalModelTier = setLocalModelTier;
+
+function getLocalModelPopupSizeText(profile) {
+    if (!profile) return "429MB";
+    if (profile.popupSizeText) return String(profile.popupSizeText);
+    if (profile.key === "code") return "369MB";
+    if (profile.key === "middle") return "592MB";
+    if (profile.key === "hard") return "558MB";
+    return "429MB";
+}
+
+function getLocalModelPopupTitle() {
+    const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
+    if (locale.startsWith("ko")) return "\ub85c\uceec \ubaa8\ub378 \ub2e4\uc6b4\ub85c\ub4dc";
+    return "Download Local Model";
+}
+
+function getLocalModelPopupMessage() {
+    const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
+    const profile = getActiveLocalModelProfile();
+    const sizeText = getLocalModelPopupSizeText(profile);
+    if (locale.startsWith("ko")) {
+        return `\ub85c\uceec \ubaa8\ub378(${sizeText})\uc744 \ub2e4\uc6b4\ub85c\ub4dc\ud55c \ub4a4 \ub85c\uceec \ubaa8\ub4dc\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc694. \uacc4\uc18d\ud560\uae4c\uc694?`;
+    }
+    return `Download the local model (${sizeText}) to use local mode. Continue?`;
+}
+
+function handleLocalToggle() {
+    ensureDefaultLocalModelTierForActivation();
+    applyLocalModelProfileToConfig();
+    isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
+
+    if (isModelDownloaded) {
+        isLocalActive = !isLocalActive;
+        if (!isLocalActive || isModelLoaded) {
+            updateLocalBtnState();
+            renderLocalModelTierSelector();
+            syncLocalModelTierVisibility();
+        } else {
+            startDownload();
+        }
+    } else {
+        showPopup(getLocalModelPopupTitle(), getLocalModelPopupMessage(), () => {
+            isLocalActive = true;
+            syncLocalModelTierVisibility();
+            startDownload();
+        });
+    }
+}
+
+function setLocalRuntimeState(runtimeName) {
+    localRuntime = runtimeName || null;
+    window.ISAI_LOCAL_RUNTIME = localRuntime;
+    if (localRuntime) {
+        localStorage.setItem(getLocalRuntimeStorageKey(), localRuntime);
+    } else {
+        localStorage.removeItem(getLocalRuntimeStorageKey());
+    }
+}
+
+function updateLocalProgress(bar, progress) {
+    if (!bar) return;
+    const numeric = Number(progress);
+    const safeProgress = Number.isFinite(numeric) ? numeric : 0;
+    const normalized = safeProgress > 1 ? safeProgress : safeProgress * 100;
+    const percent = Math.max(0, Math.min(100, Math.round(normalized)));
+    bar.style.width = percent + "%";
+}
+
+function mapPromptMessagesForLocalEngine(promptArr) {
+    if (!Array.isArray(promptArr)) return [];
+    return promptArr
+        .map((message) => ({
+            role: message && typeof message.role === "string" ? message.role : "user",
+            content: String(message && message.content != null ? message.content : "")
+        }))
+        .filter((message) => message.content.trim().length > 0);
+}
+
+async function loadWebLLMLocalEngine(container, bar) {
+    const modelConfig = window.MODEL_CONFIG || {};
+    const webllm = window.WebLLMObj;
+    if (!webllm || typeof webllm.CreateMLCEngine !== "function") {
+        throw new Error("WebLLM module is not ready.");
+    }
+    if (!navigator.gpu) {
+        throw new Error("WebGPU is not available in this browser.");
+    }
+    if (localEngine && localRuntime === "webllm") {
+        return localEngine;
+    }
+
+    const modelId = modelConfig.webllm ? modelConfig.webllm.modelId : "Qwen2-0.5B-Instruct-q4f16_1-MLC";
+    localEngine = await webllm.CreateMLCEngine(modelId, {
+        logLevel: "WARN",
+        initProgressCallback: (report) => {
+            if (container) container.classList.remove("hidden");
+            updateLocalProgress(bar, report && report.progress);
+        }
+    });
+
+    setLocalRuntimeState("webllm");
+    return localEngine;
+}
+
+async function loadWllamaFallbackEngine(container, bar) {
+    const modelConfig = window.MODEL_CONFIG || {};
+    const fallbackConfig = modelConfig.fallback || {};
+    const { Wllama, LoggerWithoutDebug } = window.WllamaObj || {};
+    if (!Wllama) {
+        throw new Error("Fallback runtime is not available.");
+    }
+    if (!fallbackConfig.url || !fallbackConfig.wasmPaths) {
+        throw new Error("Fallback model configuration is missing.");
+    }
+
+    if (!wllama) {
+        wllama = new Wllama(fallbackConfig.wasmPaths, { logger: LoggerWithoutDebug });
+    }
+
+    await wllama.loadModelFromUrl(fallbackConfig.url, {
+        n_ctx: 4096,
+        progressCallback: ({ loaded, total }) => {
+            if (container) container.classList.remove("hidden");
+            if (total) {
+                updateLocalProgress(bar, loaded / total);
+            }
+        }
+    });
+
+    localEngine = wllama;
+    setLocalRuntimeState("wllama");
+    return localEngine;
 }
 
 async function startDownload() {
     const container = document.getElementById("progress-container");
     const bar = document.getElementById("progress-bar");
+    applyLocalModelProfileToConfig();
 
     try {
         container.classList.remove("hidden");
-        const { Wllama, LoggerWithoutDebug } = window.WllamaObj;
+        updateLocalProgress(bar, 0);
+        const modelConfig = window.MODEL_CONFIG || {};
+        const preferredRuntime = String(modelConfig.preferredRuntime || "").toLowerCase();
+        let webllmError = null;
         
-        if (!wllama) {
-            wllama = new Wllama(MODEL_CONFIG.wasmPaths, { logger: LoggerWithoutDebug });
-        }
-
-        await wllama.loadModelFromUrl(MODEL_CONFIG.url, {
-            n_ctx: 4096,
-            progressCallback: ({ loaded, total }) => {
-                bar.style.width = Math.round((loaded / total) * 100) + "%";
+        if (preferredRuntime === "wllama") {
+            await loadWllamaFallbackEngine(container, bar);
+        } else {
+            try {
+                await loadWebLLMLocalEngine(container, bar);
+            } catch (error) {
+                webllmError = error;
+                await loadWllamaFallbackEngine(container, bar);
             }
-        });
+        }
 
         isModelDownloaded = true;
         isModelLoaded = true;
         isLocalActive = true;
-        localStorage.setItem("ISAI_MODEL_DOWNLOADED", "true");
+        localStorage.setItem(getLocalDownloadStorageKey(), "true");
         container.classList.add("hidden");
         updateLocalBtnState();
+
+        if (webllmError && localRuntime === "wllama") {
+            console.warn("WebLLM initialization failed, using fallback runtime instead.", webllmError);
+        }
 
     } catch (error) {
         if (error.message && error.message.includes("initialized")) {
             isModelDownloaded = true;
             isModelLoaded = true;
             isLocalActive = true;
-            localStorage.setItem("ISAI_MODEL_DOWNLOADED", "true");
+            localStorage.setItem(getLocalDownloadStorageKey(), "true");
             container.classList.add("hidden");
             updateLocalBtnState();
             return;
@@ -1034,13 +1678,57 @@ async function startDownload() {
         container.classList.add("hidden");
         alert(error.message);
         isModelDownloaded = false;
-        localStorage.removeItem("ISAI_MODEL_DOWNLOADED");
+        isModelLoaded = false;
+        localEngine = null;
+        setLocalRuntimeState(null);
+        localStorage.removeItem(getLocalDownloadStorageKey());
     }
 }
 
 async function runLocalInference(promptArr, callback) {
+    const modelConfig = window.MODEL_CONFIG || {};
+    const webllmConfig = modelConfig.webllm || {};
     if (isLocalActive && !isModelLoaded) {
         await startDownload();
+    }
+
+    if (localRuntime === "webllm" && localEngine) {
+        const messages = mapPromptMessagesForLocalEngine(promptArr);
+        if (messages.length === 0) return;
+
+        if (typeof localEngine.resetChat === "function") {
+            try {
+                await localEngine.resetChat();
+            } catch (error) {
+                console.warn("Failed to reset local WebLLM chat state.", error);
+            }
+        }
+
+        const stream = await localEngine.chat.completions.create({
+            messages,
+            temperature: webllmConfig.temperature ?? 0.65,
+            top_p: webllmConfig.topP ?? 0.9,
+            max_tokens: webllmConfig.maxTokens ?? 900,
+            stream: true
+        });
+
+        for await (const chunk of stream) {
+            if (stopSignal) {
+                if (typeof localEngine.interruptGenerate === "function") {
+                    localEngine.interruptGenerate();
+                }
+                break;
+            }
+
+            const delta = chunk && chunk.choices && chunk.choices[0] && chunk.choices[0].delta
+                ? chunk.choices[0].delta.content
+                : "";
+
+            if (delta) {
+                callback(delta);
+            }
+        }
+        return;
     }
     
     const formatted = await wllama.formatChat(promptArr, true);
@@ -1072,9 +1760,54 @@ function stopGeneration() {
             abortController.abort();
             abortController = null;
         }
+        if (localRuntime === "webllm" && localEngine && typeof localEngine.interruptGenerate === "function") {
+            localEngine.interruptGenerate();
+        }
         stopSignal = true;
         showLoader(false);
     }
+}
+
+function decodeHtmlEntitiesLocal(value) {
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = String(value ?? "");
+    return textarea.value;
+}
+
+function sanitizeAiHtmlLocal(value) {
+    return String(value ?? "")
+        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+        .replace(/<img\b[^>]*>/gi, "")
+        .replace(/\son\w+=(["']).*?\1/gi, "")
+        .replace(/\son\w+=([^\s>]+)/gi, "")
+        .replace(/\s(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, ' $1="#"');
+}
+
+function formatAiBubbleContent(content) {
+    const raw = String(content ?? "");
+    const decoded = decodeHtmlEntitiesLocal(raw);
+    const sanitizedDecoded = sanitizeAiHtmlLocal(decoded);
+    const sanitizedRaw = sanitizeAiHtmlLocal(raw);
+    const htmlCandidate = /<\/?[a-z][^>]*>/i.test(sanitizedDecoded) ? sanitizedDecoded : sanitizedRaw;
+
+    if (/<\/?[a-z][^>]*>/i.test(htmlCandidate)) {
+        return htmlCandidate;
+    }
+    return htmlCandidate.replace(/\n/g, "<br>");
+}
+
+function isImageErrorMessageLocal(value) {
+    return /^Image Error:/i.test(String(value ?? "").trim());
+}
+
+function imageErrorIconHtmlLocal(message) {
+    const safeMessage = String(message ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .trim() || "Image generation failed";
+    return `<span class="image-error-icon" title="${safeMessage}" aria-label="${safeMessage}"><i class="ri-image-line"></i><i class="ri-close-circle-fill image-error-icon-badge"></i></span>`;
 }
 
 function appendMsg(role, content) {
@@ -1087,97 +1820,47 @@ function appendMsg(role, content) {
         chatBox.appendChild(spacer);
     }
 
-    let isAppAi = false;
-    let iconUrl = "";
-    let aiName = "AI";
-    const appRef = window.activeApp || activeApp;
-
-    if (role === "ai" && appRef && appRef.icon_url) {
-        isAppAi = true;
-        iconUrl = appRef.icon_url;
-        aiName = appRef.title || "AI";
-    }
-
-    let returnElement = null;
-
-    if (isAppAi) {
-        const wrapper = document.createElement("div");
-        wrapper.className = "flex w-full items-start gap-2.5 mb-4 animate-fade-in group";
-
-        const imgWrapper = document.createElement("div");
-        imgWrapper.className = "relative flex-shrink-0";
-
-        const img = document.createElement("img");
-        img.src = iconUrl;
-        img.className = "w-10 h-10 rounded-[14px] object-cover border border-black/5 shadow-sm bg-gray-100";
-
-        const fallback = document.createElement("div");
-        fallback.className = "absolute inset-0 w-10 h-10 rounded-[14px] bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm shadow-sm hidden";
-        fallback.innerText = aiName.charAt(0).toUpperCase();
-
-        img.onerror = function() {
-            this.style.display = "none";
-            fallback.classList.remove("hidden");
-        };
-
-        imgWrapper.appendChild(img);
-        imgWrapper.appendChild(fallback);
-
-        const textWrapper = document.createElement("div");
-        textWrapper.className = "flex flex-col gap-1 max-w-[75%]";
-
-        const nameLabel = document.createElement("span");
-        nameLabel.className = "text-[11px] text-gray-500 font-bold ml-1 opacity-90";
-        nameLabel.innerText = aiName;
-
-        const bubble = document.createElement("div");
-        bubble.className = "px-4 py-2.5 rounded-[18px] rounded-tl-none text-sm break-words leading-relaxed shadow-sm relative";
+    const bubble = document.createElement("div");
+    if (role === "user") {
+        bubble.className = "self-end px-4 py-2.5 rounded-[18px] rounded-tr-none max-w-[85%] shadow mb-3 text-sm break-words ml-auto";
+        bubble.style.backgroundColor = "var(--accent, #3b82f6)";
+        bubble.style.color = "var(--accent-text, #ffffff)";
+    } else {
+        bubble.className = "self-start px-4 py-2.5 rounded-[18px] rounded-tl-none max-w-[85%] mb-3 text-sm break-words leading-relaxed shadow-sm";
         bubble.style.backgroundColor = "var(--bg-island, #ffffff)";
         bubble.style.color = "var(--text-main, #333333)";
-
-        if (content.trim().startsWith("<div") || content.trim().startsWith("<p")) {
-            bubble.innerHTML = content;
-        } else {
-            bubble.innerHTML = content.replace(/\n/g, "<br>");
+        if (currentMode === "search") {
+            bubble.classList.add("search-result-bubble");
+            bubble.style.backgroundColor = "#ffffff";
+            bubble.style.color = "#111827";
+            bubble.style.border = "1px solid rgba(15, 23, 42, 0.12)";
+            bubble.style.boxShadow = "0 14px 30px rgba(15, 23, 42, 0.10)";
         }
-
-        textWrapper.appendChild(nameLabel);
-        textWrapper.appendChild(bubble);
-
-        wrapper.appendChild(imgWrapper);
-        wrapper.appendChild(textWrapper);
-
-        chatBox.appendChild(wrapper);
-        returnElement = bubble;
-    } else {
-        const bubble = document.createElement("div");
-        if (role === "user") {
-            bubble.className = "self-end px-4 py-2.5 rounded-[18px] rounded-tr-none max-w-[85%] shadow mb-3 text-sm break-words ml-auto";
-            bubble.style.backgroundColor = "var(--accent, #3b82f6)";
-            bubble.style.color = "var(--accent-text, #ffffff)";
-        } else {
-            bubble.className = "self-start px-4 py-2.5 rounded-[18px] rounded-tl-none max-w-[85%] mb-3 text-sm break-words leading-relaxed shadow-sm";
-            bubble.style.backgroundColor = "var(--bg-island, #ffffff)";
-            bubble.style.color = "var(--text-main, #333333)";
-        }
-
-        if (role === "user") {
-            let safeContent = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            bubble.innerHTML = safeContent.replace(/\n/g, "<br>");
-        } else if (content.trim().startsWith("<div") || content.trim().startsWith("<p")) {
-            bubble.innerHTML = content;
-        } else if (role === "ai" || role === "error") {
-            bubble.innerHTML = content;
-        } else {
-            bubble.innerHTML = content.replace(/\n/g, "<br>");
-        }
-
-        chatBox.appendChild(bubble);
-        returnElement = bubble;
     }
 
+    if (role === "user") {
+        const safeContent = String(content ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        bubble.innerHTML = safeContent.replace(/\n/g, "<br>");
+    } else {
+        const imageError = role === "error" && isImageErrorMessageLocal(content);
+        if (imageError) {
+            bubble.className = "chat-bubble-image-error";
+            bubble.style.backgroundColor = "";
+            bubble.style.color = "";
+            bubble.style.border = "";
+            bubble.style.boxShadow = "";
+            bubble.innerHTML = imageErrorIconHtmlLocal(content);
+        } else {
+            bubble.innerHTML = formatAiBubbleContent(content);
+        }
+    }
+
+    chatBox.appendChild(bubble);
     scrollBottom();
-    return returnElement;
+    return bubble;
 }
 
 function appendImg(base64Data, promptText) {
@@ -1233,14 +1916,36 @@ function appendGif(blob, promptText) {
 }
 
 function addSourcesToBubble(bubbleElement, sources) {
-    let html = '<div class="border-t border-white/10 mt-3 pt-2 flex flex-wrap gap-2 items-center">';
-    html += '<span class="text-[10px] text-gray-500 mr-1 uppercase tracking-widest font-bold">SOURCE</span>';
-    
-    sources.forEach((src) => {
+    if (!bubbleElement || !Array.isArray(sources) || sources.length === 0) return;
+
+    const uniqueSources = sources.filter((src, index, arr) => {
+        if (!src || !src.url) return false;
+        return arr.findIndex((item) => item && item.url === src.url) === index;
+    }).slice(0, 5);
+
+    const escapeHtml = (value) => String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const domainLabel = (url) => {
+        try {
+            return new URL(url).hostname.replace(/^www\./i, "");
+        } catch (error) {
+            return url;
+        }
+    };
+
+    let html = '<div class="mt-4 pt-3 border-t border-black/10 flex flex-wrap gap-2 items-center">';
+
+    uniqueSources.forEach((src) => {
         const favicon = "https://www.google.com/s2/favicons?sz=64&domain_url=" + encodeURIComponent(src.url);
-        html += `<a href="${src.url}" target="_blank" class="w-6 h-6 rounded bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/20 transition" title="${src.title}"><img src="${favicon}" class="w-3.5 h-3.5 opacity-70"></a>`;
+        const label = src.title || src.url;
+        const host = domainLabel(src.url);
+        html += `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="search-source-link inline-flex items-center gap-1.5 max-w-[150px] rounded-full bg-black/[0.04] border border-black/[0.08] px-2.5 py-1 text-[11px] font-medium text-[#111827] hover:bg-black/[0.08] transition" title="${escapeHtml(label)}"><img src="${favicon}" class="w-3.5 h-3.5 opacity-85" alt=""><span class="truncate">${escapeHtml(host)}</span></a>`;
     });
-    
+
     html += "</div>";
     bubbleElement.innerHTML += html;
 }
@@ -1401,18 +2106,119 @@ window.openFullEditor = function(blockId) {
     const el = document.getElementById(blockId);
     if (el) {
         const text = el.innerText;
-        document.getElementById("code-editor").value = text;
-        document.getElementById("right-panel").classList.add("mobile-active");
-        document.getElementById("code-tabs").innerHTML = '<button class="px-3 py-1.5 text-xs rounded-md transition font-mono font-bold">Current Code</button>';
-        
-        if (!document.body.classList.contains("mode-code")) {
-            document.body.classList.add("mode-code");
+        const codeEditor = document.getElementById("code-editor");
+        const rightPanel = document.getElementById("right-panel");
+        const codeTabs = document.getElementById("code-tabs");
+        const rightPanelOriginAnchor = document.getElementById("right-panel-origin-anchor");
+        const desktopCodePanelHost = document.getElementById("desktop-code-panel-host");
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const mobileCodeMode = vw <= 900;
+        const desktopCodeMode = vw > 900;
+        const codePanelGridColumn = vw <= 1180 ? "1 / span 2" : "1 / span 4";
+        const codePanelGridRow = vw <= 900 ? "2" : (vw <= 1180 ? "3" : "2");
+        const codePanelMinHeight = vw <= 900 ? "240px" : "320px";
+        const codePanelMaxHeight = vw <= 900 ? "360px" : "520px";
+        if (codeEditor) codeEditor.value = text;
+        if (codeTabs) {
+            codeTabs.innerHTML = '<button class="px-3 py-1.5 text-xs rounded-md transition font-mono font-bold">Current Code</button>';
+        }
+
+        if (typeof window.syncInlineCodePanel === "function") {
+            window.syncInlineCodePanel("code");
+        } else {
+            if (rightPanel) {
+                if (document.body) document.body.setAttribute("data-ui-mode", "code");
+                document.body.classList.remove("desktop-code-stage");
+                document.body.classList.toggle("mode-code", mobileCodeMode);
+                document.body.classList.toggle("desktop-code-open", desktopCodeMode);
+                document.body.classList.toggle("desktop-code-panel-mounted", desktopCodeMode);
+                rightPanel.classList.toggle("mobile-active", mobileCodeMode);
+                rightPanel.classList.remove("hidden");
+                if (rightPanelOriginAnchor && rightPanelOriginAnchor.parentElement && desktopCodePanelHost) {
+                    if (desktopCodeMode) {
+                        desktopCodePanelHost.style.display = "block";
+                        desktopCodePanelHost.style.width = "100%";
+                        desktopCodePanelHost.style.minWidth = "0";
+                        desktopCodePanelHost.style.minHeight = codePanelMinHeight;
+                        if (rightPanel.parentElement !== desktopCodePanelHost) {
+                            desktopCodePanelHost.appendChild(rightPanel);
+                        }
+                    } else if (rightPanel.parentElement !== rightPanelOriginAnchor.parentElement) {
+                        rightPanelOriginAnchor.parentElement.insertBefore(rightPanel, rightPanelOriginAnchor.nextSibling);
+                    }
+                }
+                rightPanel.style.display = "flex";
+                rightPanel.style.visibility = "visible";
+                rightPanel.style.opacity = "1";
+                rightPanel.style.width = "100%";
+                rightPanel.style.minWidth = "0";
+                rightPanel.style.maxWidth = "100%";
+                if (mobileCodeMode) {
+                    rightPanel.style.gridRow = codePanelGridRow;
+                    rightPanel.style.gridColumn = codePanelGridColumn;
+                } else {
+                    rightPanel.style.removeProperty("grid-row");
+                    rightPanel.style.removeProperty("grid-column");
+                }
+                rightPanel.style.height = "auto";
+                rightPanel.style.minHeight = codePanelMinHeight;
+                rightPanel.style.maxHeight = codePanelMaxHeight;
+                rightPanel.style.overflow = "hidden";
+                rightPanel.style.borderTop = "1px solid rgba(255, 255, 255, 0.06)";
+            }
+        }
+
+        if (rightPanel) {
+            setTimeout(() => {
+                try {
+                    (desktopCodeMode && desktopCodePanelHost ? desktopCodePanelHost : rightPanel).scrollIntoView({ behavior: "smooth", block: "start" });
+                } catch (error) {}
+            }, vw <= 900 ? 90 : 20);
         }
     }
 };
 
 window.closeFullEditor = function() {
-    document.getElementById("right-panel").classList.remove("mobile-active");
+    const rightPanel = document.getElementById("right-panel");
+    if (rightPanel) rightPanel.classList.remove("mobile-active");
+    if (typeof currentMode !== "undefined" && currentMode === "code" && typeof setMode === "function") {
+        setMode("chat");
+        return;
+    }
+    document.body.classList.remove("mode-code");
+    document.body.classList.remove("desktop-code-stage");
+    if (document.body) document.body.setAttribute("data-ui-mode", "chat");
+    document.body.classList.remove("desktop-code-open");
+    document.body.classList.remove("desktop-code-panel-mounted");
+    if (rightPanel) {
+        rightPanel.classList.remove("mobile-active");
+        rightPanel.style.removeProperty("display");
+        rightPanel.style.removeProperty("visibility");
+        rightPanel.style.removeProperty("opacity");
+        rightPanel.style.removeProperty("width");
+        rightPanel.style.removeProperty("min-width");
+        rightPanel.style.removeProperty("max-width");
+        rightPanel.style.removeProperty("grid-row");
+        rightPanel.style.removeProperty("grid-column");
+        rightPanel.style.removeProperty("height");
+        rightPanel.style.removeProperty("min-height");
+        rightPanel.style.removeProperty("max-height");
+        rightPanel.style.removeProperty("overflow");
+        rightPanel.style.removeProperty("border-top");
+        rightPanel.classList.add("hidden");
+    }
+    const rightPanelOriginAnchor = document.getElementById("right-panel-origin-anchor");
+    const desktopCodePanelHost = document.getElementById("desktop-code-panel-host");
+    if (rightPanel && desktopCodePanelHost) {
+        desktopCodePanelHost.style.display = "none";
+        desktopCodePanelHost.style.removeProperty("min-height");
+        desktopCodePanelHost.style.removeProperty("visibility");
+        desktopCodePanelHost.style.removeProperty("opacity");
+        desktopCodePanelHost.style.removeProperty("overflow");
+    }
+    if (rightPanel && rightPanelOriginAnchor && rightPanelOriginAnchor.parentElement && rightPanel.parentElement !== rightPanelOriginAnchor.parentElement) {
+        rightPanelOriginAnchor.parentElement.insertBefore(rightPanel, rightPanelOriginAnchor.nextSibling);
+    }
 };
 
 let codeFiles =[];
@@ -1431,6 +2237,31 @@ function updateCodePanel(text) {
     }
 }
 
+function getCodeTabIcon(lang = "", name = "") {
+    const key = String(lang || name || "").toLowerCase();
+    if (key.includes("html")) return "ri-html5-line";
+    if (key.includes("css") || key.includes("scss")) return "ri-css3-line";
+    if (key.includes("js") || key.includes("ts") || key.includes("json")) return "ri-braces-line";
+    if (key.includes("php")) return "ri-ai-generate-text";
+    if (key.includes("py")) return "ri-terminal-box-line";
+    if (key.includes("sql")) return "ri-database-2-line";
+    if (key.includes("md")) return "ri-markdown-line";
+    if (key.includes("sh") || key.includes("bash")) return "ri-terminal-line";
+    return "ri-ai-generate-text";
+}
+
+function getCodeTabShortLabel(file = {}) {
+    const lang = String(file.lang || "").trim();
+    if (lang) return lang.slice(0, 4).toUpperCase();
+    const name = String(file.name || "").trim();
+    const ext = name.includes(".") ? name.split(".").pop() : name;
+    return String(ext || "TXT").slice(0, 4).toUpperCase();
+}
+
+function getCodePanelEmptyMarkup() {
+    return '<div class="code-panel-empty"><span class="code-panel-empty-icon"><i class="ri-ai-generate-text text-sm"></i></span><span class="code-panel-empty-dots" aria-hidden="true"><span></span><span></span><span></span></span></div>';
+}
+
 function renderCodeTabs() {
     const tabsContainer = document.getElementById("code-tabs");
     const editor = document.getElementById("code-editor");
@@ -1444,8 +2275,10 @@ function renderCodeTabs() {
                 btn.type = "button";
                 
                 btn.className = "code-tab-btn " + (index === activeFileIndex ? "active" : "");
-                
-                btn.innerText = file.name;
+                const iconClass = getCodeTabIcon(file.lang, file.name);
+                const shortLabel = getCodeTabShortLabel(file);
+                btn.title = file.name || file.lang || "Code";
+                btn.innerHTML = `<span class="code-tab-icon"><i class="${iconClass}"></i></span><span class="code-tab-label">${shortLabel}</span>`;
                 btn.onclick = (e) => {
                     e.preventDefault();
                     window.switchCodeFile(index);
@@ -1458,7 +2291,7 @@ function renderCodeTabs() {
                 editor.value = codeFiles[activeFileIndex].content;
             }
         } else {
-            tabsContainer.innerHTML = '<span class="text-[10px] text-white/20 px-3 tracking-widest uppercase">No files</span>';
+            tabsContainer.innerHTML = getCodePanelEmptyMarkup();
         }
     }
 }
@@ -1487,7 +2320,7 @@ function resetChat() {
     
     const viewId = new URLSearchParams(window.location.search).get("v");
     
-    document.getElementById("code-tabs").innerHTML = '<span class="text-xs text-gray-500 px-2">Waiting...</span>';
+    document.getElementById("code-tabs").innerHTML = getCodePanelEmptyMarkup();
     document.getElementById("code-editor").value = "";
     
     document.body.classList.remove("started");

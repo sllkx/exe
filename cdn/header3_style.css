@@ -2455,9 +2455,9 @@ select option {
                 width: 58px !important;
                 min-width: 58px !important;
                 max-width: 58px !important;
-                height: 250px !important;
-                min-height: 250px !important;
-                max-height: 250px !important;
+                height: 282px !important;
+                min-height: 282px !important;
+                max-height: 282px !important;
                 border-radius: 0 !important;
                 border: none !important;
                 border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -2760,9 +2760,9 @@ select option {
                 max-width: 100% !important;
                 flex-basis: auto;
                 flex: 1 1 auto;
-                height: 250px !important;
-                min-height: 250px !important;
-                max-height: 250px !important;
+                height: 282px !important;
+                min-height: 282px !important;
+                max-height: 282px !important;
                 border-left: none;
                 border-top: 1px solid rgba(15, 23, 42, 0.08);
                 background: #ffffff !important;
@@ -2774,10 +2774,10 @@ select option {
                 align-self: stretch !important;
             }
             #chat-side-ad-body {
-                height: 250px !important;
-                min-height: 250px !important;
-                max-height: 250px !important;
-                padding: 8px 6px !important;
+                height: 282px !important;
+                min-height: 282px !important;
+                max-height: 282px !important;
+                padding: 16px 6px !important;
                 align-items: center;
                 justify-content: center;
                 background: #ffffff !important;
@@ -2810,8 +2810,8 @@ select option {
             }
             body.mode-code #right-panel,
             #right-panel.mobile-active {
-                max-height: 360px !important;
-                min-height: 240px !important;
+                max-height: 420px !important;
+                min-height: 280px !important;
             }
         }
         @media (max-width: 380px) {
@@ -2839,7 +2839,7 @@ select option {
                 bottom: 10px !important;
             }
             #chat-side-ad-body {
-                padding: 0 !important;
+                padding: 12px 6px !important;
             }
             #tts-controls {
                 padding: 10px 10px 0 10px;
@@ -2859,7 +2859,7 @@ select option {
                 overflow: hidden !important;
             }
             #chat-side-ad-body {
-                padding: 8px 6px !important;
+                padding: 16px 6px !important;
                 overflow: hidden !important;
             }
             .chat-ad-frame {

@@ -29,6 +29,12 @@ async function parseJsonResponseSafeVoice(response) {
     return cleaned ? JSON.parse(cleaned) : {};
 }
 
+function getVoiceApiMaxChars() {
+    const raw = Number(window.ISAI_API_MAX_CHARS || 700);
+    if (!Number.isFinite(raw)) return 700;
+    return Math.max(120, Math.min(4000, Math.floor(raw)));
+}
+
 function extractPlainTextVoice(value) {
     const normalized = String(value || '')
         .replace(/<think>[\s\S]*?(<\/think>|$)/gi, ' ')
@@ -258,7 +264,12 @@ async function performVoiceConversationRequest(text) {
         const history = Array.isArray(chatHistory) ? chatHistory.slice(-6) : [];
         const response = await fetch('?action=ai_chat', {
             method: 'POST',
-            body: JSON.stringify({ prompt: finalPrompt, history: history, system_prompt: sysPrompt })
+            body: JSON.stringify({
+                prompt: finalPrompt,
+                history: history,
+                system_prompt: sysPrompt,
+                max_chars: getVoiceApiMaxChars()
+            })
         });
         const data = await parseJsonResponseSafeVoice(response);
 

@@ -34,6 +34,12 @@ let currentAppQuery = "";
 const STORE_LIMIT = 12;
 const APP_LIMIT = 24;
 
+function getIsaiApiMaxChars() {
+    const raw = Number(window.ISAI_API_MAX_CHARS || 700);
+    if (!Number.isFinite(raw)) return 700;
+    return Math.max(120, Math.min(4000, Math.floor(raw)));
+}
+
 function sanitizeJsonPayloadText(rawText) {
     const text = String(rawText ?? "");
     const withoutBom = text.replace(/^\uFEFF/, "");
@@ -626,7 +632,12 @@ async function executeAction(side = "right") {
                 } else {
                     const response = await fetch("?action=ai_chat", {
                         method: "POST",
-                        body: JSON.stringify({ prompt: finalPrompt, history: currentHistory, system_prompt: sysPrompt }),
+                        body: JSON.stringify({
+                            prompt: finalPrompt,
+                            history: currentHistory,
+                            system_prompt: sysPrompt,
+                            max_chars: getIsaiApiMaxChars()
+                        }),
                         signal: abortController.signal
                     });
                     

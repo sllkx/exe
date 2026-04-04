@@ -103,6 +103,152 @@
             helper.remove();
         }
         window.copyCodeEditorContent = copyCodeEditorContent;
+        function getGitHubSettings() {
+            return {
+                username: String(localStorage.getItem('ISAI_GH_USERNAME') || '').trim(),
+                repo: String(localStorage.getItem('ISAI_GH_REPO') || '').trim(),
+                token: String(localStorage.getItem('ISAI_GH_TOKEN') || '').trim()
+            };
+        }
+        function saveGitHubSettings() {
+            const usernameEl = document.getElementById('gh-username');
+            const repoEl = document.getElementById('gh-repo');
+            const tokenEl = document.getElementById('gh-token');
+            const username = usernameEl ? String(usernameEl.value || '').trim() : '';
+            const repo = repoEl ? String(repoEl.value || '').trim() : '';
+            const token = tokenEl ? String(tokenEl.value || '').trim() : '';
+            if (!username || !token) {
+                if (typeof showToast === 'function') showToast('Username / Token 필요');
+                return false;
+            }
+            localStorage.setItem('ISAI_GH_USERNAME', username);
+            localStorage.setItem('ISAI_GH_REPO', repo);
+            localStorage.setItem('ISAI_GH_TOKEN', token);
+            if (typeof showToast === 'function') showToast('GitHub 설정 저장 완료');
+            return true;
+        }
+        function openGitHubConnectModal() {
+            const modal = document.getElementById('gh-connect-modal');
+            if (!modal) return;
+            const settings = getGitHubSettings();
+            const usernameEl = document.getElementById('gh-username');
+            const repoEl = document.getElementById('gh-repo');
+            const tokenEl = document.getElementById('gh-token');
+            if (usernameEl) usernameEl.value = settings.username || '';
+            if (repoEl) repoEl.value = settings.repo || '';
+            if (tokenEl) tokenEl.value = settings.token || '';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function closeGitHubConnectModal() {
+            const modal = document.getElementById('gh-connect-modal');
+            if (!modal) return;
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+        async function ensureRepoExists(username, repo, token) {
+            const repoName = String(repo || '').trim() || 'isai-playground';
+            const checkRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(username)}/${encodeURIComponent(repoName)}`, {
+                headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json' }
+            });
+            if (checkRes.ok) return repoName;
+
+            const createRes = await fetch('https://api.github.com/user/repos', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                    'Accept': 'application/vnd.github+json'
+                },
+                body: JSON.stringify({
+                    name: repoName,
+                    description: 'ISAI Playground Publish',
+                    private: false,
+                    auto_init: true
+                })
+            });
+            if (!createRes.ok) {
+                const raw = await createRes.text();
+                let err = {};
+                try { err = JSON.parse(raw); } catch (e) {}
+                throw new Error((err && err.message) ? err.message : 'Repository create failed');
+            }
+            return repoName;
+        }
+        async function publishCodeToGitHub(forceFromModal) {
+            const editor = document.getElementById('code-editor');
+            const codeText = editor ? String(editor.value || '').trim() : '';
+            if (!codeText) {
+                if (typeof showToast === 'function') showToast('Code is empty.');
+                return;
+            }
+
+            if (forceFromModal === true) {
+                if (!saveGitHubSettings()) return;
+            }
+            const settings = getGitHubSettings();
+            if (!settings.username || !settings.token) {
+                openGitHubConnectModal();
+                return;
+            }
+
+            const fileNameInput = window.prompt('File name (ex: app.js)', 'app.js');
+            if (fileNameInput === null) return;
+            const fileName = String(fileNameInput || '').trim() || 'app.js';
+            const publishTitle = 'isai-playground-' + new Date().toISOString().slice(0, 10);
+            const path = 'playground/' + Date.now() + '-' + fileName.replace(/[^\w.\-]/g, '_');
+
+            try {
+                if (typeof showLoader === 'function') showLoader(true);
+                const repoName = await ensureRepoExists(settings.username, settings.repo, settings.token);
+                if (!settings.repo) localStorage.setItem('ISAI_GH_REPO', repoName);
+
+                const putRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(settings.username)}/${encodeURIComponent(repoName)}/contents/${encodeURIComponent(path)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + settings.token,
+                        'Accept': 'application/vnd.github+json'
+                    },
+                    body: JSON.stringify({
+                        message: 'Publish from ISAI Playground',
+                        content: btoa(unescape(encodeURIComponent(codeText)))
+                    })
+                });
+                const putRaw = await putRes.text();
+                let putJson = {};
+                try { putJson = JSON.parse(String(putRaw || '{}')); } catch (e) {}
+                if (!putRes.ok) throw new Error((putJson && putJson.message) ? putJson.message : 'Publish failed');
+
+                const htmlUrl = `https://github.com/${settings.username}/${repoName}/blob/main/${path}`;
+                try {
+                    await fetch('re_store.php?action=save_code_publish', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            gist_id: `${settings.username}/${repoName}:${path}`,
+                            gist_url: htmlUrl,
+                            title: publishTitle,
+                            file_name: fileName,
+                            language: (fileName.split('.').pop() || 'txt').slice(0, 20),
+                            code: codeText
+                        })
+                    });
+                } catch (saveError) {}
+
+                closeGitHubConnectModal();
+                if (typeof showToast === 'function') showToast('Published to GitHub');
+                window.open(htmlUrl, '_blank', 'noopener');
+            } catch (error) {
+                if (typeof showToast === 'function') showToast('Publish failed: ' + (error.message || 'Unknown'));
+            } finally {
+                if (typeof showLoader === 'function') showLoader(false);
+            }
+        }
+        window.openGitHubConnectModal = openGitHubConnectModal;
+        window.closeGitHubConnectModal = closeGitHubConnectModal;
+        window.saveGitHubSettings = saveGitHubSettings;
+        window.publishCodeToGitHub = publishCodeToGitHub;
         function setBoardRailActive(tab) {
             document.querySelectorAll('#board-right-rail [data-board-tab]').forEach((button) => {
                 button.classList.toggle('active', button.dataset.boardTab === tab);

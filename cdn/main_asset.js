@@ -30,6 +30,7 @@ let currentAppPage = 1;
 let isAppLoading = false;
 let hasMoreApps = true;
 let currentAppQuery = "";
+let defaultChatProfileSrc = "";
 
 const STORE_LIMIT = 12;
 const APP_LIMIT = 24;
@@ -838,6 +839,39 @@ function renderStoreItems(apps, container) {
     });
 }
 
+function getChatInputProfileImg() {
+    const wrapper = document.getElementById("chat-input-profile");
+    if (!wrapper) return null;
+    return wrapper.querySelector("img");
+}
+
+function setChatInputProfile(src, altText) {
+    const img = getChatInputProfileImg();
+    if (!img) return;
+    if (src && String(src).trim()) img.src = String(src).trim();
+    if (altText) img.alt = String(altText);
+}
+
+function applyActiveAppProfileToChatInput() {
+    if (!activeApp) return;
+    const appTitle = String(activeApp.title || "App");
+    const iconUrl = String(activeApp.icon_url || "").trim();
+    if (iconUrl) {
+        setChatInputProfile(iconUrl, appTitle);
+        return;
+    }
+    const fallbackUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(appTitle)}&backgroundColor=transparent`;
+    setChatInputProfile(fallbackUrl, appTitle);
+}
+
+function restoreDefaultChatInputProfile() {
+    if (defaultChatProfileSrc) {
+        setChatInputProfile(defaultChatProfileSrc, "My Profile");
+        return;
+    }
+    setChatInputProfile("https://api.dicebear.com/7.x/identicon/svg?seed=IP&backgroundColor=transparent", "My Profile");
+}
+
 function activateAppMode() {
     if (isMenuOpen) toggleStoreMenu();
     document.getElementById("active-app-status").classList.remove("hidden");
@@ -850,12 +884,14 @@ function activateAppMode() {
     } else {
         appendMsg("ai", `App '${activeApp.title}' started.`);
     }
+    applyActiveAppProfileToChatInput();
 }
 
 function exitAppMode() {
     activeApp = null;
     document.getElementById("active-app-status").classList.add("hidden");
     resetChat();
+    restoreDefaultChatInputProfile();
     showToast("App Mode Exited");
 }
 
@@ -937,6 +973,11 @@ window.addEventListener("DOMContentLoaded", () => {
     chatBox.style.display = "flex";
     chatBox.style.flexDirection = "column";
     chatBox.style.height = "100%";
+
+    const profileImg = getChatInputProfileImg();
+    if (profileImg && profileImg.src) {
+        defaultChatProfileSrc = profileImg.src;
+    }
 
     const btnChat = document.getElementById("btn-chat");
     if (btnChat) btnChat.classList.add("active");

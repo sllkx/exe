@@ -220,17 +220,20 @@
                 try { putJson = JSON.parse(String(putRaw || '{}')); } catch (e) {}
                 if (!putRes.ok) throw new Error((putJson && putJson.message) ? putJson.message : 'Publish failed');
 
-                const htmlUrl = `https://github.com/${settings.username}/${repoName}/blob/main/${path}`;
+                const githubUrl = `https://github.com/${settings.username}/${repoName}/blob/main/${path}`;
+                const runUrl = `https://cdn.jsdelivr.net/gh/${encodeURIComponent(settings.username)}/${encodeURIComponent(repoName)}@main/${path}`;
                 try {
                     await fetch('re_store.php?action=save_code_publish', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             gist_id: `${settings.username}/${repoName}:${path}`,
-                            gist_url: htmlUrl,
+                            gist_url: githubUrl,
+                            run_url: runUrl,
                             title: publishTitle,
                             file_name: fileName,
                             language: (fileName.split('.').pop() || 'txt').slice(0, 20),
+                            source_type: 'github',
                             code: codeText
                         })
                     });
@@ -238,7 +241,11 @@
 
                 closeGitHubConnectModal();
                 if (typeof showToast === 'function') showToast('Published to GitHub');
-                window.open(htmlUrl, '_blank', 'noopener');
+                if ((fileName || '').toLowerCase().endsWith('.html')) {
+                    window.open(runUrl, '_blank', 'noopener');
+                } else {
+                    window.open(githubUrl, '_blank', 'noopener');
+                }
             } catch (error) {
                 if (typeof showToast === 'function') showToast('Publish failed: ' + (error.message || 'Unknown'));
             } finally {

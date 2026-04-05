@@ -33,11 +33,43 @@ let currentAppQuery = "";
 
 const STORE_LIMIT = 12;
 const APP_LIMIT = 24;
+const URL_IMAGE_DAILY_COOKIE = "ISAI_URL_IMAGE_DAILY";
 
 function getIsaiApiMaxChars() {
     const raw = Number(window.ISAI_API_MAX_CHARS || 700);
     if (!Number.isFinite(raw)) return 700;
     return Math.max(120, Math.min(4000, Math.floor(raw)));
+}
+
+function getCookieValue(name) {
+    const key = `${name}=`;
+    const cookies = document.cookie ? document.cookie.split(";") : [];
+    for (const raw of cookies) {
+        const c = raw.trim();
+        if (c.startsWith(key)) {
+            return decodeURIComponent(c.substring(key.length));
+        }
+    }
+    return "";
+}
+
+function getTodayKey() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}${mm}${dd}`;
+}
+
+function hasUsedUrlImageToday() {
+    return getCookieValue(URL_IMAGE_DAILY_COOKIE) === getTodayKey();
+}
+
+function markUrlImageUsedToday() {
+    const now = new Date();
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+    document.cookie = `${URL_IMAGE_DAILY_COOKIE}=${encodeURIComponent(getTodayKey())}; expires=${endOfDay.toUTCString()}; path=/; SameSite=Lax`;
 }
 
 function sanitizeJsonPayloadText(rawText) {
@@ -943,6 +975,13 @@ window.addEventListener("DOMContentLoaded", () => {
     for (const mode of modes) {
         const queryVal = params.get(mode);
         if (queryVal) {
+            if (mode === "image" && hasUsedUrlImageToday()) {
+                showToast("URL image generation is limited to once per day.");
+                params.delete("image");
+                const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+                history.replaceState(null, document.title, nextUrl);
+                break;
+            }
             setMode(mode);
             const promptInput = document.getElementById("prompt-input");
             if (promptInput) {
@@ -950,6 +989,7 @@ window.addEventListener("DOMContentLoaded", () => {
                 handleInput(promptInput);
             }
             setTimeout(() => {
+                if (mode === "image") markUrlImageUsedToday();
                 executeAction();
             }, 800);
             break;
@@ -2461,14 +2501,6 @@ function getCodeTabIcon(lang = "", name = "") {
     return "ri-ai-generate-text";
 }
 
-function getCodeTabShortLabel(file = {}) {
-    const lang = String(file.lang || "").trim();
-    if (lang) return lang.slice(0, 4).toUpperCase();
-    const name = String(file.name || "").trim();
-    const ext = name.includes(".") ? name.split(".").pop() : name;
-    return String(ext || "TXT").slice(0, 4).toUpperCase();
-}
-
 function getCodePanelEmptyMarkup() {
     return '<div class="code-panel-empty"><span class="code-panel-empty-icon"><i class="ri-ai-generate-text text-sm"></i></span><span class="code-panel-empty-dots" aria-hidden="true"><span></span><span></span><span></span></span></div>';
 }
@@ -2487,9 +2519,8 @@ function renderCodeTabs() {
                 
                 btn.className = "code-tab-btn " + (index === activeFileIndex ? "active" : "");
                 const iconClass = getCodeTabIcon(file.lang, file.name);
-                const shortLabel = getCodeTabShortLabel(file);
                 btn.title = file.name || file.lang || "Code";
-                btn.innerHTML = `<span class="code-tab-icon"><i class="${iconClass}"></i></span><span class="code-tab-label">${shortLabel}</span>`;
+                btn.innerHTML = `<span class="code-tab-icon"><i class="${iconClass}"></i></span>`;
                 btn.onclick = (e) => {
                     e.preventDefault();
                     window.switchCodeFile(index);

@@ -2234,17 +2234,15 @@ select option {
             overflow-y: hidden;
         }
         .code-tab-btn {
-            width: 48px;
-            min-width: 48px;
+            width: 38px;
+            min-width: 38px;
             height: 38px;
             min-height: 38px;
             padding: 0;
             border-radius: 14px;
             display: inline-flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 3px;
             box-sizing: border-box;
             color: rgba(255,255,255,0.46);
             background: rgba(255,255,255,0.03);
@@ -2278,15 +2276,7 @@ select option {
             border-color: transparent;
         }
         .code-tab-label {
-            font-size: 8px;
-            line-height: 1;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            font-weight: 700;
-            max-width: 38px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            display: none !important;
         }
         .code-panel-empty {
             width: auto;

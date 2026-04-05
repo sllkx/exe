@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clicker</title>
+  <style>
+    body{margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1020;color:#fff;font-family:system-ui}
+    .card{width:min(92vw,420px);background:#111a33;border:1px solid #2b3a68;border-radius:20px;padding:24px;text-align:center}
+    button{width:160px;height:160px;border-radius:999px;border:none;background:#3b82f6;color:#fff;font-size:20px;font-weight:700;cursor:pointer}
+    .score{font-size:38px;font-weight:800;margin:8px 0 18px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Clicker Game</h1>
+    <div class="score" id="score">0</div>
+    <button id="btn">CLICK</button>
+  </div>
+  <script>
+    let s=0;const score=document.getElementById('score');
+    document.getElementById('btn').onclick=()=>{s++;score.textContent=s;};
+  </script>
+</body>
+</html>
+

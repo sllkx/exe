@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Breakout</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#0a0f1d}canvas{background:#111;border:1px solid #333}</style>
+<canvas id=c width=420 height=300></canvas><script>
+const c=document.getElementById('c'),x=c.getContext('2d');let px=180,bx=210,by=150,vx=3,vy=-3;
+const bricks=[...Array(5)].map((_,r)=>[...Array(10)].map((_,k)=>({x:k*40+10,y:r*16+16,on:1})));onmousemove=e=>{const r=c.getBoundingClientRect();px=Math.max(0,Math.min(340,e.clientX-r.left-40));};
+function d(){x.clearRect(0,0,420,300);x.fillStyle='#fff';x.fillRect(px,280,80,10);x.beginPath();x.arc(bx,by,6,0,7);x.fill();
+x.fillStyle='#3b82f6';bricks.forEach(row=>row.forEach(b=>b.on&&x.fillRect(b.x,b.y,36,12)));
+bx+=vx;by+=vy;if(bx<6||bx>414)vx*=-1;if(by<6)vy*=-1;if(by>300){bx=210;by=150;}
+if(by>272&&bx>px&&bx<px+80)vy=-Math.abs(vy);
+bricks.forEach(row=>row.forEach(b=>{if(b.on&&bx>b.x&&bx<b.x+36&&by>b.y&&by<b.y+12){b.on=0;vy*=-1;}}));
+requestAnimationFrame(d)}d();
+</script>
+

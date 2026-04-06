@@ -1466,6 +1466,9 @@ function setLocalModelTier(tierKey) {
 
     const activeProfile = getActiveLocalModelProfile();
     if (activeProfile && typeof showToast === "function") {
+        const safeReadySuffix = isModelDownloaded ? " (\ub2e4\uc6b4\ub85c\ub4dc\ub428)" : "";
+        showToast(`${getLocalizedLocalModelTierLabel(nextTier)} \ubaa8\ub378 \uc120\ud0dd${safeReadySuffix}`);
+        return;
         const readySuffix = isModelDownloaded ? " (다운로드됨)" : "";
         showToast(`${getLocalizedLocalModelTierLabel(nextTier)} 모델 선택${readySuffix}`);
     }
@@ -1490,6 +1493,12 @@ function getLocalModelTierLocale() {
 function getLocalizedLocalModelTierLabel(tierKey) {
     const key = String(tierKey || "").trim().toLowerCase();
     const locale = getLocalModelTierLocale();
+    const safeLabels = {
+        ko: { code: "\ucf54\ub4dc", light: "\ub77c\uc774\ud2b8", middle: "\uc911\uac04", hard: "\ud558\ub4dc" },
+        en: { code: "Code", light: "Light", middle: "Middle", hard: "Hard" }
+    };
+    const safeTable = safeLabels[locale] || safeLabels.en;
+    return safeTable[key] || safeLabels.en[key] || getLocalModelTierLabelFallback(key);
     const labels = {
         ko: { code: "코드", light: "라이트", middle: "중간", hard: "하드" },
         ja: { code: "コード", light: "ライト", middle: "ミドル", hard: "ハード" },

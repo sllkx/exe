@@ -110,6 +110,23 @@
                 token: String(localStorage.getItem('ISAI_GH_TOKEN') || '').trim()
             };
         }
+        async function resolveGitHubIdentity(token, fallbackUsername) {
+            const fallback = String(fallbackUsername || '').trim();
+            if (!token) return fallback;
+            try {
+                const res = await fetch('https://api.github.com/user', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Accept': 'application/vnd.github+json'
+                    }
+                });
+                const json = await res.json();
+                const login = String((json && json.login) || '').trim();
+                return login || fallback;
+            } catch (e) {
+                return fallback;
+            }
+        }
         function saveGitHubSettings() {
             const usernameEl = document.getElementById('gh-username');
             const repoEl = document.getElementById('gh-repo');
@@ -117,8 +134,8 @@
             const username = usernameEl ? String(usernameEl.value || '').trim() : '';
             const repo = repoEl ? String(repoEl.value || '').trim() : '';
             const token = tokenEl ? String(tokenEl.value || '').trim() : '';
-            if (!username || !token) {
-                if (typeof showToast === 'function') showToast('Username / Token 필요');
+            if (!token) {
+                if (typeof showToast === 'function') showToast('Token 필요');
                 return false;
             }
             localStorage.setItem('ISAI_GH_USERNAME', username);
@@ -187,7 +204,7 @@
                 if (!saveGitHubSettings()) return;
             }
             const settings = getGitHubSettings();
-            if (!settings.username || !settings.token) {
+            if (!settings.token) {
                 openGitHubConnectModal();
                 return;
             }
@@ -200,10 +217,15 @@
 
             try {
                 if (typeof showLoader === 'function') showLoader(true);
-                const repoName = await ensureRepoExists(settings.username, settings.repo, settings.token);
+                const owner = await resolveGitHubIdentity(settings.token, settings.username);
+                if (!owner) {
+                    throw new Error('GitHub username not found');
+                }
+                localStorage.setItem('ISAI_GH_USERNAME', owner);
+                const repoName = await ensureRepoExists(owner, settings.repo, settings.token);
                 if (!settings.repo) localStorage.setItem('ISAI_GH_REPO', repoName);
 
-                const putRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(settings.username)}/${encodeURIComponent(repoName)}/contents/${encodeURIComponent(path)}`, {
+                const putRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/contents/${encodeURIComponent(path)}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -220,14 +242,14 @@
                 try { putJson = JSON.parse(String(putRaw || '{}')); } catch (e) {}
                 if (!putRes.ok) throw new Error((putJson && putJson.message) ? putJson.message : 'Publish failed');
 
-                const githubUrl = `https://github.com/${settings.username}/${repoName}/blob/main/${path}`;
-                const runUrl = `https://cdn.jsdelivr.net/gh/${encodeURIComponent(settings.username)}/${encodeURIComponent(repoName)}@main/${path}`;
+                const githubUrl = `https://github.com/${owner}/${repoName}/blob/main/${path}`;
+                const runUrl = `https://cdn.jsdelivr.net/gh/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}@main/${path}`;
                 try {
                     await fetch('re_store.php?action=save_code_publish', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            gist_id: `${settings.username}/${repoName}:${path}`,
+                            gist_id: `${owner}/${repoName}:${path}`,
                             gist_url: githubUrl,
                             run_url: runUrl,
                             title: publishTitle,

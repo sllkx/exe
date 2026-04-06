@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>2048</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#111827;color:#fff;font-family:system-ui}.g{display:grid;grid-template:repeat(4,70px)/repeat(4,70px);gap:8px}.c{display:grid;place-items:center;background:#1f2937;border-radius:10px;font-weight:800}</style>
+<h1>2048</h1><div class=g id=g></div><script>
+let b=[...Array(4)].map(()=>Array(4).fill(0));function r(){const e=[];for(let y=0;y<4;y++)for(let x=0;x<4;x++)if(!b[y][x])e.push([y,x]);if(!e.length)return;const [y,x]=e[Math.random()*e.length|0];b[y][x]=Math.random()<.9?2:4}
+function draw(){g.innerHTML='';for(let y=0;y<4;y++)for(let x=0;x<4;x++){const d=document.createElement('div');d.className='c';d.textContent=b[y][x]||'';g.appendChild(d)}}
+function move(dir){let moved=0;const tr=a=>{a=a.filter(v=>v);for(let i=0;i<a.length-1;i++)if(a[i]===a[i+1]){a[i]*=2;a[i+1]=0}return a.filter(v=>v).concat(Array(4).fill(0)).slice(0,4)};
+for(let i=0;i<4;i++){let l=[];for(let j=0;j<4;j++)l.push(dir%2?b[j][i]:b[i][j]);if(dir>1)l=l.reverse();let n=tr(l);if(dir>1)n=n.reverse();for(let j=0;j<4;j++){if(dir%2){if(b[j][i]!==n[j])moved=1;b[j][i]=n[j]}else{if(b[i][j]!==n[j])moved=1;b[i][j]=n[j]}}}
+if(moved){r();draw()}}
+onkeydown=e=>{if(e.key==='ArrowLeft')move(0);if(e.key==='ArrowUp')move(1);if(e.key==='ArrowRight')move(2);if(e.key==='ArrowDown')move(3);}
+r();r();draw();
+</script>
+

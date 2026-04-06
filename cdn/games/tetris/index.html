@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mini Tetris</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#0b1020;color:#fff;font-family:system-ui}canvas{background:#111;border:1px solid #333}</style>
+<canvas id=c width=200 height=400></canvas><script>
+const W=10,H=20,S=20,c=document.getElementById('c'),x=c.getContext('2d');let b=[...Array(H)].map(()=>Array(W).fill(0)),p={x:3,y:0,m:[[1,1],[1,1]]},t=0;
+onkeydown=e=>{if(e.key==='ArrowLeft')p.x--;if(e.key==='ArrowRight')p.x++;if(e.key==='ArrowDown')p.y++;};
+function coll(){for(let y=0;y<p.m.length;y++)for(let x0=0;x0<p.m[y].length;x0++)if(p.m[y][x0]&&(b[p.y+y]?.[p.x+x0]??1))return 1;return 0}
+function merge(){for(let y=0;y<p.m.length;y++)for(let x0=0;x0<p.m[y].length;x0++)if(p.m[y][x0])b[p.y+y][p.x+x0]=1}
+function line(){for(let y=H-1;y>=0;y--)if(b[y].every(v=>v)){b.splice(y,1);b.unshift(Array(W).fill(0));y++}}
+function spawn(){p={x:Math.floor(Math.random()*7),y:0,m:Math.random()<.5?[[1,1,1],[0,1,0]]:[[1,1],[1,1]]};if(coll())b=[...Array(H)].map(()=>Array(W).fill(0))}
+spawn();function draw(){x.fillStyle='#111';x.fillRect(0,0,c.width,c.height);x.fillStyle='#3b82f6';for(let y=0;y<H;y++)for(let x0=0;x0<W;x0++)if(b[y][x0])x.fillRect(x0*S,y*S,S-1,S-1);
+x.fillStyle='#f59e0b';for(let y=0;y<p.m.length;y++)for(let x0=0;x0<p.m[y].length;x0++)if(p.m[y][x0])x.fillRect((p.x+x0)*S,(p.y+y)*S,S-1,S-1)}
+function loop(ts){if(ts-t>450){p.y++;if(coll()){p.y--;merge();line();spawn()}t=ts}draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+</script>
+

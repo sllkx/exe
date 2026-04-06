@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Whack A Dot</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#111827;color:#fff;font-family:system-ui}.g{display:grid;grid-template:repeat(3,90px)/repeat(3,90px);gap:8px}.c{border-radius:14px;background:#1f2937;display:grid;place-items:center;cursor:pointer}</style>
+<h1 id=t>Whack A Dot - 0</h1><div class=g id=g></div><script>
+let s=0,a=-1;for(let i=0;i<9;i++){const d=document.createElement('button');d.className='c';d.onclick=()=>{if(i===a){s++;t.textContent='Whack A Dot - '+s;pick()}};g.appendChild(d)}
+function pick(){a=Math.random()*9|0;[...g.children].forEach((el,i)=>el.textContent=i===a?'●':'');}
+setInterval(()=>pick(),700);pick();
+</script>
+

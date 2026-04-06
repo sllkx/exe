@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Runner</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#0b0f1a}canvas{background:#111;border:1px solid #333}</style>
+<canvas id=c width=460 height=220></canvas><script>
+const c=document.getElementById('c'),x=c.getContext('2d');let py=170,v=0,g=.6,ob=460,sc=0,j=0;
+onkeydown=e=>{if((e.code==='Space'||e.key==='ArrowUp')&&!j){v=-10;j=1}};onclick=()=>{if(!j){v=-10;j=1}};
+function d(){v+=g;py+=v;if(py>=170){py=170;v=0;j=0}ob-=5;if(ob<-20){ob=460;sc++}
+if(ob<70&&ob>40&&py>150){sc=0;ob=460}
+x.fillStyle='#111';x.fillRect(0,0,460,220);x.fillStyle='#444';x.fillRect(0,190,460,2);x.fillStyle='#3b82f6';x.fillRect(50,py,20,20);x.fillStyle='#ef4444';x.fillRect(ob,160,14,30);x.fillStyle='#fff';x.fillText('Score '+sc,8,16);
+requestAnimationFrame(d)}d();
+</script>
+

@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Flappy</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#0ea5e9}canvas{background:#7dd3fc;border:1px solid #0369a1}</style>
+<canvas id=c width=320 height=480></canvas><script>
+const c=document.getElementById('c'),x=c.getContext('2d');let y=220,v=0,g=.35,score=0,pipes=[{x:360,gap:220},{x:540,gap:180}];
+onkeydown=e=>{if(e.code==='Space')v=-6};onclick=()=>v=-6;
+function reset(){y=220;v=0;score=0;pipes=[{x:360,gap:220},{x:540,gap:180}]}
+function d(){v+=g;y+=v;x.fillStyle='#7dd3fc';x.fillRect(0,0,320,480);x.fillStyle='#16a34a';
+pipes.forEach(p=>{p.x-=2;if(p.x<-40){p.x=360;p.gap=120+Math.random()*220;score++}x.fillRect(p.x,0,40,p.gap-70);x.fillRect(p.x,p.gap+70,40,480);if(160>p.x&&160<p.x+40&&(y<p.gap-70||y>p.gap+70))reset();});
+x.fillStyle='#f59e0b';x.beginPath();x.arc(160,y,12,0,7);x.fill();if(y<0||y>480)reset();x.fillStyle='#111';x.fillText('Score '+score,8,16);requestAnimationFrame(d)}d();
+</script>
+

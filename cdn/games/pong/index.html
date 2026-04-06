@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pong</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#0f172a}canvas{background:#111;border:1px solid #333}</style>
+<canvas id=c width=480 height=280></canvas><script>
+const c=document.getElementById('c'),x=c.getContext('2d');let ly=110,ry=110,bx=240,by=140,vx=3,vy=2,ls=0,rs=0;
+onmousemove=e=>{const r=c.getBoundingClientRect();ly=Math.max(0,Math.min(220,e.clientY-r.top-30));};
+function reset(){bx=240;by=140;vx*=-1;}
+function loop(){ry+=((by-30)-ry)*.08;bx+=vx;by+=vy;if(by<6||by>274)vy*=-1;
+if(bx<18&&by>ly&&by<ly+60)vx=Math.abs(vx);if(bx>462&&by>ry&&by<ry+60)vx=-Math.abs(vx);
+if(bx<0){rs++;reset()}if(bx>480){ls++;reset()}
+x.clearRect(0,0,480,280);x.fillStyle='#fff';x.fillRect(8,ly,10,60);x.fillRect(462,ry,10,60);x.fillRect(bx-5,by-5,10,10);x.fillText(ls+' : '+rs,225,16);
+requestAnimationFrame(loop)}loop();
+</script>
+

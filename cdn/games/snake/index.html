@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Snake</title><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#0b0f1a;color:#fff;font-family:system-ui}canvas{background:#111;border:1px solid #333}</style>
+<canvas id=c width=360 height=360></canvas><script>
+const c=document.getElementById('c'),x=c.getContext('2d'),s=20;let d=[1,0],p=[[5,5]],f=[10,10],sp=120,sc=0;
+onkeydown=e=>{if(e.key==='ArrowUp'&&d[1]!==1)d=[0,-1];if(e.key==='ArrowDown'&&d[1]!==-1)d=[0,1];if(e.key==='ArrowLeft'&&d[0]!==1)d=[-1,0];if(e.key==='ArrowRight'&&d[0]!==-1)d=[1,0];};
+function tick(){let h=[p[0][0]+d[0],p[0][1]+d[1]];if(h[0]<0||h[1]<0||h[0]>=18||h[1]>=18||p.some(v=>v[0]===h[0]&&v[1]===h[1])){p=[[5,5]];d=[1,0];sc=0;}
+p.unshift(h);if(h[0]===f[0]&&h[1]===f[1]){sc++;f=[Math.floor(Math.random()*18),Math.floor(Math.random()*18)]}else p.pop();
+x.fillStyle='#111';x.fillRect(0,0,360,360);x.fillStyle='#22c55e';p.forEach(v=>x.fillRect(v[0]*s,v[1]*s,s-1,s-1));x.fillStyle='#ef4444';x.fillRect(f[0]*s,f[1]*s,s-1,s-1);
+x.fillStyle='#fff';x.fillText('Score '+sc,8,14);setTimeout(tick,sp)}tick();
+</script>
+

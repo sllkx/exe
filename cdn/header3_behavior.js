@@ -103,6 +103,66 @@
             helper.remove();
         }
         window.copyCodeEditorContent = copyCodeEditorContent;
+        const HTML_PREVIEW_STORAGE_KEY = 'ISAI_HTML_PREVIEW_ENABLED';
+        function isHtmlPreviewEnabled() {
+            return localStorage.getItem(HTML_PREVIEW_STORAGE_KEY) === '1';
+        }
+        function looksLikeHtmlDocument(text) {
+            const value = String(text || '').trim().toLowerCase();
+            if (!value) return false;
+            return value.includes('<html') || value.includes('<body') || value.includes('<div') || value.includes('<script') || value.includes('<!doctype html');
+        }
+        function setHtmlPreviewButtonState(enabled) {
+            const btn = document.getElementById('code-html-preview-toggle');
+            if (!btn) return;
+            btn.classList.toggle('is-active', !!enabled);
+        }
+        function refreshHtmlPreview() {
+            const frame = document.getElementById('html-preview-frame');
+            const editor = document.getElementById('code-editor');
+            if (!frame || !editor) return;
+            const codeText = String(editor.value || '');
+            const previewHtml = looksLikeHtmlDocument(codeText)
+                ? codeText
+                : `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:24px;background:#0f1115;color:#f3f4f6;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}pre{white-space:pre-wrap;word-break:break-word}</style></head><body><pre>${codeText.replace(/[&<>]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[ch]; })}</pre></body></html>`;
+            frame.srcdoc = previewHtml;
+        }
+        function clearHtmlPreview() {
+            const frame = document.getElementById('html-preview-frame');
+            if (!frame) return;
+            frame.removeAttribute('src');
+            frame.srcdoc = '';
+        }
+        function applyHtmlPreviewState() {
+            const pane = document.getElementById('html-preview-pane');
+            const enabled = isHtmlPreviewEnabled();
+            if (document.body) document.body.classList.toggle('html-preview-active', enabled);
+            if (pane) pane.classList.toggle('hidden', !enabled);
+            setHtmlPreviewButtonState(enabled);
+            if (enabled) {
+                refreshHtmlPreview();
+            } else {
+                clearHtmlPreview();
+            }
+        }
+        function toggleHtmlPreview(forceValue) {
+            const next = typeof forceValue === 'boolean' ? forceValue : !isHtmlPreviewEnabled();
+            localStorage.setItem(HTML_PREVIEW_STORAGE_KEY, next ? '1' : '0');
+            applyHtmlPreviewState();
+        }
+        function bindHtmlPreviewEditor() {
+            const editor = document.getElementById('code-editor');
+            if (!editor || editor.dataset.previewBound === '1') return;
+            const sync = function () {
+                if (isHtmlPreviewEnabled()) refreshHtmlPreview();
+            };
+            editor.addEventListener('input', sync);
+            editor.addEventListener('keyup', sync);
+            editor.dataset.previewBound = '1';
+        }
+        window.toggleHtmlPreview = toggleHtmlPreview;
+        window.refreshHtmlPreview = refreshHtmlPreview;
+        window.clearHtmlPreview = clearHtmlPreview;
         function getGitHubSettings() {
             return {
                 username: String(localStorage.getItem('ISAI_GH_USERNAME') || '').trim(),
@@ -212,7 +272,6 @@
             const fileNameInput = window.prompt('File name (ex: app.js)', 'app.js');
             if (fileNameInput === null) return;
             const fileName = String(fileNameInput || '').trim() || 'app.js';
-            const publishTitle = 'isai-playground-' + new Date().toISOString().slice(0, 10);
             const path = 'playground/' + Date.now() + '-' + fileName.replace(/[^\w.\-]/g, '_');
 
             try {
@@ -252,7 +311,7 @@
                             gist_id: `${owner}/${repoName}:${path}`,
                             gist_url: githubUrl,
                             run_url: runUrl,
-                            title: publishTitle,
+                            title: repoName,
                             file_name: fileName,
                             language: (fileName.split('.').pop() || 'txt').slice(0, 20),
                             source_type: 'github',
@@ -393,6 +452,7 @@
             rightPanel.classList.toggle('mobile-active', mobileCodeMode);
 
             if (isCodeMode) {
+                bindHtmlPreviewEditor();
                 if (codeTabs && !codeTabs.querySelector('.code-tab-btn')) {
                     codeTabs.innerHTML = '<div class="code-panel-empty"><span class="code-panel-empty-icon"><i class="ri-ai-generate-text text-sm"></i></span><span class="code-panel-empty-dots" aria-hidden="true"><span></span><span></span><span></span></span></div>';
                 }
@@ -400,6 +460,7 @@
                 if (codeEditor && !String(codeEditor.value || '').trim()) {
                     codeEditor.value = '// Describe the code you want and generated files will appear here.';
                 }
+                applyHtmlPreviewState();
 
                 rightPanel.classList.remove('hidden');
                 rightPanel.style.setProperty('display', 'flex', 'important');
@@ -438,6 +499,8 @@
                     chatInputShell.style.setProperty('opacity', '1', 'important');
                 }
             } else {
+                clearHtmlPreview();
+                if (document.body) document.body.classList.remove('html-preview-active');
                 document.body.classList.remove('desktop-code-stage');
                 document.body.classList.remove('desktop-code-open');
                 document.body.classList.remove('desktop-code-panel-mounted');

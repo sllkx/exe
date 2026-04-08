@@ -68,6 +68,53 @@ function normalizeIsaiVoiceLang(langCode) {
     return map[raw] || fallback;
 }
 
+function resolveVoiceLangCode(value, fallback = 'en-US') {
+    if (typeof window.resolveSpeechLangCode === 'function') {
+        return window.resolveSpeechLangCode(value, fallback);
+    }
+
+    const raw = String(value || '').trim();
+    if (!raw) return normalizeIsaiVoiceLang(fallback);
+
+    const alias = {
+        en: 'en-US',
+        english: 'en-US',
+        ko: 'ko-KR',
+        kr: 'ko-KR',
+        korean: 'ko-KR',
+        ja: 'ja-JP',
+        jp: 'ja-JP',
+        japanese: 'ja-JP',
+        zh: 'zh-CN',
+        cn: 'zh-CN',
+        chinese: 'zh-CN',
+        es: 'es-ES',
+        sp: 'es-ES',
+        spanish: 'es-ES',
+        fr: 'fr-FR',
+        french: 'fr-FR',
+        de: 'de-DE',
+        ge: 'de-DE',
+        german: 'de-DE',
+        ru: 'ru-RU',
+        russian: 'ru-RU',
+        pt: 'pt-PT',
+        portuguese: 'pt-PT',
+        hi: 'hi-IN',
+        hindi: 'hi-IN'
+    };
+
+    if (/^[a-z]{2}-[a-z]{2}$/i.test(raw)) {
+        const [lang, region] = raw.split('-');
+        return `${String(lang).toLowerCase()}-${String(region).toUpperCase()}`;
+    }
+
+    const normalized = raw.toLowerCase().replace(/_/g, '-');
+    if (alias[normalized]) return alias[normalized];
+
+    return normalizeIsaiVoiceLang(raw || fallback);
+}
+
 function resolveSpeechVoiceByName(name, langCode) {
     const voices = window.speechSynthesis && typeof window.speechSynthesis.getVoices === 'function'
         ? window.speechSynthesis.getVoices()
@@ -101,9 +148,9 @@ function updateRecognitionLang() {
         const rightVal = rightEl ? rightEl.value : 'Korean';
 
         if (translationSide === 'left') {
-            targetLangCode = langMap[leftVal] || 'en-US';
+            targetLangCode = resolveVoiceLangCode(leftVal, 'en-US');
         } else {
-            targetLangCode = langMap[rightVal] || 'ko-KR';
+            targetLangCode = resolveVoiceLangCode(rightVal, 'ko-KR');
         }
     } else {
         const settings = getIsaiVoiceSettingsSafe();
@@ -324,20 +371,31 @@ async function performTranslationRequest(text, side) {
 
     const leftLang = document.getElementById('trans-select-left')?.value || 'English';
     const rightLang = document.getElementById('trans-select-right')?.value || 'Korean';
+    const sourceLangName = side === 'left' ? leftLang : rightLang;
     const targetLangName = side === 'left' ? rightLang : leftLang;
 
     try {
         const res = await fetch('?action=ai_translate', {
             method: 'POST',
-            body: JSON.stringify({ text: userText, target_lang: targetLangName })
+            body: JSON.stringify({ text: userText, source_lang: sourceLangName, target_lang: targetLangName })
         });
         const data = await parseJsonResponseSafeVoice(res);
 
         let resultText = data.response || '';
+        let detectedLang = data.lang_code || '';
         try {
-            const clean = String(data.response || '').replace(/```json/g, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(clean);
-            resultText = parsed.text || resultText;
+            if (data.response && typeof data.response === 'object') {
+                resultText = data.response.text || resultText;
+                detectedLang = data.response.lang_code || detectedLang;
+            } else {
+                const cleanRaw = String(data.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+                let clean = cleanRaw;
+                const jsonMatch = cleanRaw.match(/\{[\s\S]*\}/);
+                if (jsonMatch) clean = jsonMatch[0];
+                const parsed = JSON.parse(clean);
+                resultText = parsed.text || resultText;
+                detectedLang = parsed.lang_code || detectedLang;
+            }
         } catch (error) {}
 
         const plainTranslatedText = extractPlainTextVoice(resultText);
@@ -349,7 +407,7 @@ async function performTranslationRequest(text, side) {
             }
         }
 
-        const targetCode = langMap[targetLangName] || 'en-US';
+        const targetCode = resolveVoiceLangCode(detectedLang || targetLangName, resolveVoiceLangCode(targetLangName, 'en-US'));
         speakText(plainTranslatedText, targetCode);
     } catch (error) {
         if (typeof console !== 'undefined' && console.error) console.error(error);

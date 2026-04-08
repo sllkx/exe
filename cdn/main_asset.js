@@ -456,7 +456,7 @@ async function executeAction(side = "right") {
                     
                     let localResult = "";
                     const bubble = appendMsg("ai", "...");
-                    const speechLang = langMap[targetLang] || "en-US";
+                    const speechLang = resolveSpeechLangCode(targetLang, "en-US");
                     
                     await runLocalInference(localPrompt, (token) => {
                         if (!stopSignal) {
@@ -475,12 +475,16 @@ async function executeAction(side = "right") {
                 } else if (data.error) {
                     appendMsg("error", data.error);
                 } else {
-                    let resultObj = { text: data.response };
+                    let resultObj = { text: data.response, lang_code: data.lang_code || "" };
                     try {
-                        let cleanJson = data.response.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/g, "").replace(/```/g, "").trim();
-                        let jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-                        if (jsonMatch) cleanJson = jsonMatch[0];
-                        resultObj = JSON.parse(cleanJson);
+                        if (data.response && typeof data.response === "object") {
+                            resultObj = Object.assign({}, resultObj, data.response);
+                        } else {
+                            let cleanJson = String(data.response || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```json/g, "").replace(/```/g, "").trim();
+                            let jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+                            if (jsonMatch) cleanJson = jsonMatch[0];
+                            resultObj = Object.assign({}, resultObj, JSON.parse(cleanJson));
+                        }
                     } catch (err) {
                         resultObj.text = data.response;
                     }
@@ -491,7 +495,7 @@ async function executeAction(side = "right") {
                         translatedBubble.style.color = "#111111";
                         translatedBubble.style.fontWeight = "700";
                     }
-                    const speechLang = langMap[targetLang] || "en-US";
+                    const speechLang = resolveSpeechLangCode(resultObj.lang_code || targetLang, resolveSpeechLangCode(targetLang, "en-US"));
                     speakText(translatedText, speechLang);
                 }
             } else if (currentMode === "video") {
@@ -1108,6 +1112,57 @@ const langMap = {
     German: "de-DE",
     Russian: "ru-RU"
 };
+
+const langAliasMap = {
+    en: "en-US",
+    english: "en-US",
+    ko: "ko-KR",
+    kr: "ko-KR",
+    korean: "ko-KR",
+    ja: "ja-JP",
+    jp: "ja-JP",
+    japanese: "ja-JP",
+    zh: "zh-CN",
+    cn: "zh-CN",
+    chinese: "zh-CN",
+    es: "es-ES",
+    sp: "es-ES",
+    spanish: "es-ES",
+    fr: "fr-FR",
+    french: "fr-FR",
+    de: "de-DE",
+    ge: "de-DE",
+    german: "de-DE",
+    ru: "ru-RU",
+    russian: "ru-RU",
+    pt: "pt-PT",
+    portuguese: "pt-PT",
+    hi: "hi-IN",
+    hindi: "hi-IN"
+};
+
+function resolveSpeechLangCode(value, fallback = "en-US") {
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+
+    if (langMap[raw]) return langMap[raw];
+
+    if (/^[a-z]{2}-[a-z]{2}$/i.test(raw)) {
+        const [lang, region] = raw.split("-");
+        return `${String(lang).toLowerCase()}-${String(region).toUpperCase()}`;
+    }
+
+    const normalized = raw.toLowerCase().replace(/_/g, "-");
+    if (langAliasMap[normalized]) return langAliasMap[normalized];
+
+    if (/^[a-z]{2}$/.test(normalized) && langAliasMap[normalized]) {
+        return langAliasMap[normalized];
+    }
+
+    return fallback;
+}
+
+window.resolveSpeechLangCode = resolveSpeechLangCode;
 
 function setVoiceState(side, state) {
     const btnLeft = document.getElementById("btn-submit-left");

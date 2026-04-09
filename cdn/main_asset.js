@@ -214,8 +214,7 @@ function appendContinueIconInsideBubble(bubble, context) {
 }
 
 window.continueTruncatedAnswer = function() {
-    if (!continueWriteContext || isGenerating) return;
-    runContinueFromContext(continueWriteContext, { keepGlobal: false });
+    return;
 };
 
 let characterChatSession = null;
@@ -1392,53 +1391,11 @@ async function executeAction(side = "right", options = {}) {
                             isCodeMode: shouldForceCodePrompt,
                             isTruncated: data.truncated === true
                         });
-                        let bubble = null;
-                        let historyResult = "";
-                        let mergedForDisplay = renderedResponse;
-                        const hasContinuationTarget = isContinuationRequest && previousContinueContext && previousContinueContext.bubbleId;
-                        if (hasContinuationTarget) {
-                            const targetBubble = document.querySelector(`[data-continue-bubble-id="${previousContinueContext.bubbleId}"]`);
-                            if (targetBubble) {
-                                bubble = targetBubble;
-                                removeContinueIconFromBubble(bubble);
-                                const prevText = stripTruncatedTailNote(String(previousContinueContext.lastAssistant || ""));
-                                const nextText = stripTruncatedTailNote(String(renderedResponse || ""));
-                                mergedForDisplay = [prevText, nextText].filter(Boolean).join("\n\n").trim();
-                                bubble.innerHTML = parseMarkdownLocal(mergedForDisplay, true);
-                                updateCodeUI(mergedForDisplay);
-                                historyResult = mergedForDisplay.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
-                                if (Array.isArray(chatHistory) && chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "assistant") {
-                                    chatHistory[chatHistory.length - 1].content = historyResult;
-                                } else {
-                                    chatHistory.push({ role: "assistant", content: historyResult });
-                                }
-                            }
-                        }
-                        if (!bubble) {
-                            bubble = appendMsg("ai", parseMarkdownLocal(renderedResponse, true));
-                            updateCodeUI(renderedResponse);
-                            historyResult = renderedResponse.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
-                            if (!isContinuationRequest) {
-                                chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
-                            } else if (Array.isArray(chatHistory) && chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "assistant") {
-                                chatHistory[chatHistory.length - 1].content = historyResult;
-                            } else {
-                                chatHistory.push({ role: "assistant", content: historyResult });
-                            }
-                        }
-                        const bubbleContinueContext = {
-                            mode: currentMode,
-                            lastAssistant: historyResult,
-                            bubbleId: ensureContinueBubbleId(bubble)
-                        };
-                        if (shouldShowContinueIconForApiText(data.response, data.truncated === true)) {
-                            appendContinueIconInsideBubble(bubble, bubbleContinueContext);
-                        }
-                        if (data.truncated === true) {
-                            setContinueWriteContext(bubbleContinueContext);
-                        } else {
-                            clearContinueWriteContext();
-                        }
+                        const bubble = appendMsg("ai", parseMarkdownLocal(renderedResponse, true));
+                        updateCodeUI(renderedResponse);
+                        let historyResult = renderedResponse.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+                        chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
+                        clearContinueWriteContext();
                         scrollBottom();
                         
                         if (currentMode === "blog") await processBlogImages(bubble);
@@ -1463,11 +1420,9 @@ async function executeAction(side = "right", options = {}) {
                         }
                         appendMsg("ai", `Error: ${data.error}`);
                     } else {
-                        if (isContinuationRequest && previousContinueContext) {
-                            setContinueWriteContext(previousContinueContext);
-                        } else {
-                            clearContinueWriteContext();
-                        }
+                        const ok = await runAutoLocalFallback("No server response. Switching to local model...");
+                        if (ok) return;
+                        clearContinueWriteContext();
                         appendMsg("ai", "No response received.");
                     }
                 }

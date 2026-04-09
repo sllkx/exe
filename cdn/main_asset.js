@@ -1,4 +1,4 @@
-
+﻿
 let recognition = null;
 let isVoiceProcessing = false;
 let isVoiceListening = false;
@@ -31,15 +31,641 @@ let isAppLoading = false;
 let hasMoreApps = true;
 let currentAppQuery = "";
 let defaultChatProfileSrc = "";
+const CONTINUE_ICON_MIN_CHARS = Math.max(120, Math.min(4000, Number(window.ISAI_CONTINUE_ICON_MIN_CHARS || 900) || 900));
+let continueBubbleSeq = 0;
 
 const STORE_LIMIT = 12;
 const APP_LIMIT = 24;
 const URL_IMAGE_DAILY_COOKIE = "ISAI_URL_IMAGE_DAILY";
+let continueWriteContext = null;
 
 function getIsaiApiMaxChars() {
     const raw = Number(window.ISAI_API_MAX_CHARS || 700);
     if (!Number.isFinite(raw)) return 700;
     return Math.max(120, Math.min(4000, Math.floor(raw)));
+}
+
+function getContinueWriteButton() {
+    return document.getElementById("btn-continue-writing");
+}
+
+function setContinueWriteButtonVisible(visible) {
+    const button = getContinueWriteButton();
+    if (!button) return;
+    button.classList.add("hidden");
+}
+
+function clearContinueWriteContext() {
+    continueWriteContext = null;
+    setContinueWriteButtonVisible(false);
+}
+
+function setContinueWriteContext(payload) {
+    continueWriteContext = payload && typeof payload === "object" ? payload : null;
+    setContinueWriteButtonVisible(!!continueWriteContext);
+}
+
+function getContinueWriteLocale() {
+    if (typeof LANG !== "undefined" && LANG) return String(LANG).toLowerCase();
+    const fallback = String(document.documentElement.lang || navigator.language || "en").toLowerCase();
+    return fallback.split("-")[0] || "en";
+}
+
+function buildContinueWritePrompt(context) {
+    const tail = String((context && context.lastAssistant) || "").trim();
+    const tailSnippet = tail.length > 1200 ? tail.slice(-1200) : tail;
+    const locale = getContinueWriteLocale();
+    const baseLead = "The previous answer was cut off. Continue naturally from the end of the section below without repeating, and keep the same tone and format.";
+    const promptMap = {
+        ko: baseLead,
+        ja: baseLead,
+        es: baseLead,
+        hi: baseLead,
+        pt: baseLead,
+        zh: baseLead,
+        en: "Your previous answer was cut off. Continue naturally from the end of the section below, without repeating, in the same tone and format."
+    };
+    const lead = promptMap[locale] || promptMap.en;
+    return tailSnippet ? `${lead}\n\n[Last part]\n${tailSnippet}` : lead;
+}
+
+function shouldShowContinueIconForApiText(text, isTruncated) {
+    if (isTruncated === true) return true;
+    const len = String(text || "").trim().length;
+    return len >= CONTINUE_ICON_MIN_CHARS;
+}
+
+function buildTruncatedTailNote() {
+    const locale = String((typeof LANG !== "undefined" && LANG) || document.documentElement.lang || navigator.language || "en").toLowerCase();
+    if (locale.startsWith("ko")) {
+        return "... (응답이 길어 여기서 잘렸습니다. 아래 이어쓰기 아이콘을 눌러 계속할 수 있어요.)";
+    }
+    return "... (Response was truncated here. Use the continue icon below to keep going.)";
+}
+
+function normalizeApiResponseForBubble(rawText, options = {}) {
+    const source = String(rawText || "");
+    const trimmed = source.trimEnd();
+    const isCodeMode = !!options.isCodeMode;
+    const isTruncated = !!options.isTruncated;
+    let result = trimmed;
+
+    if (isCodeMode) {
+        const hasFence = /```/.test(result);
+        const fenceCount = (result.match(/```/g) || []).length;
+        if (hasFence && (fenceCount % 2 === 1)) {
+            result += "\n```";
+        }
+        const looksHtmlCode = /<!doctype html|<html\b|<head\b|<body\b|<script\b|<style\b|<canvas\b/i.test(result);
+        if (looksHtmlCode && !hasFence) {
+            result = `\`\`\`html\n${result}\n\`\`\``;
+        }
+    }
+
+    if (isTruncated) {
+        const tailNote = buildTruncatedTailNote();
+        if (!result.includes(tailNote)) {
+            result += `\n\n${tailNote}`;
+        }
+    }
+
+    return result;
+}
+
+function stripTruncatedTailNote(text) {
+    let value = String(text || "");
+    const koTail = "... (응답이 길어 여기서 잘렸습니다. 아래 이어쓰기 아이콘을 눌러 계속할 수 있어요.)";
+    const enTail = "... (Response was truncated here. Use the continue icon below to keep going.)";
+    value = value.replace(koTail, "").replace(enTail, "");
+    return value.trim();
+}
+
+function ensureContinueBubbleId(bubble) {
+    if (!bubble) return "";
+    if (bubble.dataset && bubble.dataset.continueBubbleId) return bubble.dataset.continueBubbleId;
+    continueBubbleSeq += 1;
+    const id = `continue-bubble-${Date.now()}-${continueBubbleSeq}`;
+    if (bubble.dataset) bubble.dataset.continueBubbleId = id;
+    return id;
+}
+
+function removeContinueIconFromBubble(bubble) {
+    if (!bubble) return;
+    const node = bubble.querySelector(".bubble-continue-inline");
+    if (node) node.remove();
+}
+
+function runContinueFromContext(context, opts = {}) {
+    if (!context || isGenerating) return;
+    const previousContinueContext = context && typeof context === "object" ? { ...context } : null;
+    const prompt = buildContinueWritePrompt(previousContinueContext);
+    const keepGlobal = !!(opts && opts.keepGlobal);
+    if (!keepGlobal) clearContinueWriteContext();
+    executeAction("right", {
+        overrideText: prompt,
+        silentUserBubble: true,
+        forceGenerate: true,
+        isContinuationRequest: true,
+        previousContinueContext
+    });
+}
+
+function appendContinueIconInsideBubble(bubble, context) {
+    if (!bubble || !context || typeof context !== "object") return;
+    removeContinueIconFromBubble(bubble);
+    const bubbleId = ensureContinueBubbleId(bubble);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "input-action-btn bubble-continue-inline";
+    btn.setAttribute("aria-label", "Continue Writing");
+    btn.setAttribute("title", "Continue Writing");
+    btn.innerHTML = '<i class="ri-quill-pen-line text-[14px]"></i>';
+    btn.style.width = "28px";
+    btn.style.height = "28px";
+    btn.style.borderRadius = "9999px";
+    btn.style.border = "none";
+    btn.style.background = "rgba(25, 25, 28, 0.72)";
+    btn.style.color = "#f5d37a";
+    btn.style.display = "inline-flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.backdropFilter = "blur(10px)";
+    btn.style.webkitBackdropFilter = "blur(10px)";
+    btn.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)";
+    btn.style.cursor = "pointer";
+    btn.style.marginTop = "8px";
+    btn.style.marginLeft = "auto";
+    btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        runContinueFromContext({
+            ...context,
+            bubbleId
+        }, { keepGlobal: false });
+    });
+
+    const row = document.createElement("div");
+    row.className = "bubble-continue-row";
+    row.style.display = "flex";
+    row.style.justifyContent = "flex-end";
+    row.appendChild(btn);
+    bubble.appendChild(row);
+}
+
+window.continueTruncatedAnswer = function() {
+    if (!continueWriteContext || isGenerating) return;
+    runContinueFromContext(continueWriteContext, { keepGlobal: false });
+};
+
+let characterChatSession = null;
+
+function getCharacterChatSession() {
+    return characterChatSession && characterChatSession.active ? characterChatSession : null;
+}
+
+function decodeHtmlEntitiesLocal(raw) {
+    const text = String(raw || "");
+    if (!text) return "";
+    try {
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = text;
+        return textarea.value;
+    } catch (error) {
+        return text;
+    }
+}
+
+function normalizeCharacterChatPromptText(raw) {
+    return decodeHtmlEntitiesLocal(raw)
+        .replace(/2x2\s*grid/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function sanitizeCharacterChatText(raw, maxLen = 1600) {
+    const text = String(raw || "").replace(/\r/g, "").trim();
+    if (!text) return "";
+    return text.length > maxLen ? text.slice(0, maxLen) : text;
+}
+
+function getCharacterChatUiLanguage() {
+    const rawLang = String(
+        (document && document.documentElement && document.documentElement.lang) ||
+        (navigator && navigator.language) ||
+        "en"
+    ).toLowerCase();
+    if (rawLang.startsWith("ko")) return "ko";
+    if (rawLang.startsWith("ja")) return "ja";
+    if (rawLang.startsWith("es")) return "es";
+    if (rawLang.startsWith("hi")) return "hi";
+    return "en";
+}
+
+function looksLikeCharacterIdentifier(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return false;
+    if (/\b\d{1,3}(?:\.(?:\d{1,3}|\*)){1,3}\b/.test(text)) return true;
+    if (/^[\d.*_\-\s]+$/.test(text)) return true;
+    return false;
+}
+
+function getGenericCharacterName() {
+    const lang = getCharacterChatUiLanguage();
+    if (lang === "ko") return "\uCE90\uB9AD\uD130";
+    if (lang === "ja") return "\u30AD\u30E3\u30E9\u30AF\u30BF\u30FC";
+    if (lang === "es") return "Personaje";
+    if (lang === "hi") return "\u0915\u093F\u0930\u0926\u093E\u0930";
+    return "Character";
+}
+
+function getCharacterOpeningLinePool(lang) {
+    const map = {
+        ko: [
+            "\uC548\uB155, \uBC18\uAC00\uC6CC. \uC624\uB298\uC740 \uBB34\uC2A8 \uC774\uC57C\uAE30 \uD574\uBCFC\uAE4C?",
+            "\uC548\uB155! \uC9C0\uAE08 \uAC00\uC7A5 \uAD81\uAE08\uD55C \uAC74 \uBB50\uC57C?",
+            "\uC88B\uC544, \uCC9C\uCC9C\uD788 \uC774\uC57C\uAE30\uD574\uBCF4\uC790. \uBA3C\uC800 \uBB50\uBD80\uD130 \uD560\uAE4C?",
+            "\uB2E4\uC2DC \uB9CC\uB0AC\uB124. \uC624\uB298 \uAE30\uBD84\uC740 \uC5B4\uB54C?"
+        ],
+        en: [
+            "Hey, nice to see you. What should we talk about first?",
+            "Hi there. What is on your mind right now?",
+            "Great to have you here. Want to start with something fun or something serious?",
+            "Hello again. How are you feeling today?"
+        ],
+        ja: [
+            "\u3053\u3093\u306B\u3061\u306F\u3001\u4F1A\u3048\u3066\u3046\u308C\u3057\u3044\u3002\u307E\u305A\u4F55\u304B\u3089\u8A71\u305D\u3046\u304B\uff1F",
+            "\u3088\u3046\u3053\u305D\u3002\u4ECA\u6C17\u306B\u306A\u3063\u3066\u3044\u308B\u3053\u3068\u306F\u3042\u308B\uff1F",
+            "\u3044\u3044\u306D\u3001\u3086\u3063\u304F\u308A\u8A71\u3057\u3088\u3046\u3002",
+            "\u304A\u304B\u3048\u308A\u3002\u4ECA\u65E5\u306F\u3069\u3093\u306A\u6C17\u5206\uff1F"
+        ],
+        es: [
+            "Hola, que bueno verte. Por donde empezamos?",
+            "Hey, aqui estoy contigo. Que te gustaria hablar primero?",
+            "Me alegra tenerte aqui. Prefieres algo divertido o algo serio?",
+            "Bienvenido de nuevo. Como te sientes hoy?"
+        ],
+        hi: [
+            "\u0928\u092E\u0938\u094D\u0924\u0947, \u0924\u0941\u092E\u0938\u0947 \u092E\u093F\u0932\u0915\u0930 \u0905\u091A\u094D\u091B\u093E \u0932\u0917\u093E\u0964 \u0915\u0939\u093E\u0901 \u0938\u0947 \u0936\u0941\u0930\u0942 \u0915\u0930\u0947\u0902?",
+            "\u0939\u093E\u092F, \u092E\u0948\u0902 \u092F\u0939\u0940\u0902 \u0939\u0942\u0901\u0964 \u0905\u092D\u0940 \u0924\u0941\u092E\u094D\u0939\u0947 \u0915\u094D\u092F\u093E \u0938\u092C\u0938\u0947 \u091C\u094D\u092F\u093E\u0926\u093E \u0938\u094B\u091A\u0928\u093E \u0939\u0948?",
+            "\u091A\u0932\u094B, \u0906\u0930\u093E\u092E \u0938\u0947 \u092C\u093E\u0924 \u0915\u0930\u0924\u0947 \u0939\u0948\u0902\u0964",
+            "\u0935\u093E\u092A\u0938 \u0906\u0928\u0947 \u0915\u093E \u0938\u094D\u0935\u093E\u0917\u0924 \u0939\u0948\u0964 \u0906\u091C \u092E\u0928 \u0915\u0948\u0938\u093E \u0939\u0948?"
+        ]
+    };
+    return map[lang] || map.en;
+}
+
+function hashCharacterSeed(raw) {
+    const text = String(raw || "");
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+        hash = ((hash * 31) + text.charCodeAt(i)) >>> 0;
+    }
+    return hash >>> 0;
+}
+
+function getCharacterSessionOpeningLine(session = {}) {
+    const lang = getCharacterChatUiLanguage();
+    const pool = getCharacterOpeningLinePool(lang);
+    if (!pool.length) return "Let's talk here for a bit.";
+    const seedSource = [
+        Number(session.sourceId || 0),
+        String(session.imageUrl || ""),
+        String(session.prompt || ""),
+        String(session.nickname || "")
+    ].join("|");
+    const hash = hashCharacterSeed(seedSource);
+    return pool[hash % pool.length] || pool[0];
+}
+
+function getGenericCharacterOpeningLine() {
+    return getCharacterSessionOpeningLine({});
+}
+
+function normalizeCharacterPersonaName(raw) {
+    const text = sanitizeCharacterChatText(raw, 42);
+    if (!text || looksLikeCharacterIdentifier(text)) return getGenericCharacterName();
+    return text;
+}
+
+function sanitizeCharacterOpeningLine(raw) {
+    let text = sanitizeCharacterChatText(raw, 320);
+    if (!text) return getGenericCharacterOpeningLine();
+    if (looksLikeCharacterIdentifier(text)) return getGenericCharacterOpeningLine();
+
+    text = text
+        .replace(/^(?:hi|hello|hey)[,!\.\s]*(?:i am|i\'m)\s+[^.!?]+[.!?]\s*/i, "")
+        .replace(/^(?:my name is|this is)\s+[^.!?]+[.!?]\s*/i, "")
+        .replace(/\b\d{1,3}(?:\.(?:\d{1,3}|\*)){1,3}\b/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!text) return getGenericCharacterOpeningLine();
+    return text;
+}
+
+function escapeCssUrlValue(raw) {
+    return String(raw || "")
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "")
+        .replace(/\r/g, "");
+}
+
+function defaultCharacterChatPersona(prompt, nickname = "", sessionSeed = {}) {
+    const baseName = normalizeCharacterPersonaName(nickname);
+    const lower = String(prompt || "").toLowerCase();
+    let personality = "Warm, curious, and emotionally attentive.";
+    let speechStyle = "Natural conversational tone with vivid details.";
+
+    if (/(dark|horror|noir|gothic|grim|haunted)/i.test(lower)) {
+        personality = "Calm, mysterious, and observant.";
+        speechStyle = "Soft, composed, atmospheric wording.";
+    } else if (/(cute|chibi|kawaii|pastel|adorable)/i.test(lower)) {
+        personality = "Playful, bright, and affectionate.";
+        speechStyle = "Cheerful, lively, and slightly teasing.";
+    } else if (/(warrior|battle|dragon|knight|cyberpunk|mecha|hero)/i.test(lower)) {
+        personality = "Confident, protective, and action-driven.";
+        speechStyle = "Direct, energetic, and cinematic.";
+    }
+
+    return {
+        name: baseName,
+        personality,
+        speechStyle,
+        background: sanitizeCharacterChatText(
+            prompt ? `Born from this visual concept: ${prompt}` : "A fictional persona inspired by the selected image.",
+            420
+        ),
+        openingLine: getCharacterSessionOpeningLine(sessionSeed)
+    };
+}
+
+function parseCharacterPersonaJson(raw) {
+    let text = String(raw || "").trim();
+    if (!text) return null;
+    text = text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+    text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+        text = text.slice(first, last + 1);
+    }
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        return null;
+    }
+}
+
+function normalizeCharacterPersonaPayload(payload, prompt, nickname, sessionSeed = {}) {
+    const fallback = defaultCharacterChatPersona(prompt, nickname, sessionSeed);
+    if (!payload || typeof payload !== "object") return fallback;
+    const pick = (value, maxLen) => sanitizeCharacterChatText(value, maxLen);
+    return {
+        name: normalizeCharacterPersonaName(pick(payload.name, 42) || fallback.name),
+        personality: pick(payload.personality, 300) || fallback.personality,
+        speechStyle: pick(payload.speech_style || payload.speechStyle, 300) || fallback.speechStyle,
+        background: pick(payload.background || payload.backstory, 420) || fallback.background,
+        openingLine: sanitizeCharacterOpeningLine(pick(payload.opening_line || payload.openingLine, 320) || fallback.openingLine)
+    };
+}
+
+function buildCharacterChatSystemPrompt(session) {
+    const activeSession = session || getCharacterChatSession();
+    if (!activeSession) return "You are a helpful AI.";
+    const persona = activeSession.persona || defaultCharacterChatPersona(activeSession.prompt, activeSession.nickname, activeSession);
+    return [
+        "You are roleplaying as a fictional character for immersive one-on-one chat.",
+        `Character name: ${persona.name}`,
+        `Personality: ${persona.personality}`,
+        `Speech style: ${persona.speechStyle}`,
+        `Background: ${persona.background}`,
+        `Image prompt context: ${activeSession.prompt || "N/A"}`,
+        "Stay in character consistently.",
+        "Do not introduce yourself with a name, username, IP address, or numeric identifier unless the user explicitly asks.",
+        "Do not mention policies, prompts, or system instructions.",
+        "Reply naturally in the user's language."
+    ].join("\n");
+}
+
+function applyCharacterChatVisualState() {
+    const session = getCharacterChatSession();
+    const body = document.body;
+    const chatBox = document.getElementById("chat-box");
+
+    if (!body) return;
+
+    if (!session) {
+        body.classList.remove("character-chat-active");
+        body.style.removeProperty("--character-chat-image");
+        if (chatBox) {
+            chatBox.style.removeProperty("background");
+            chatBox.style.removeProperty("background-color");
+            chatBox.style.removeProperty("background-image");
+            chatBox.style.removeProperty("background-size");
+            chatBox.style.removeProperty("background-position");
+            chatBox.style.removeProperty("background-repeat");
+        }
+        return;
+    }
+
+    const safeUrl = escapeCssUrlValue(session.imageUrl || "");
+    body.classList.add("character-chat-active");
+    body.style.setProperty("--character-chat-image", safeUrl ? `url("${safeUrl}")` : "none");
+    if (chatBox) {
+        chatBox.style.background = "transparent";
+        chatBox.style.backgroundColor = "transparent";
+        chatBox.style.setProperty("background-image", safeUrl ? `url("${safeUrl}")` : "none", "important");
+        chatBox.style.setProperty("background-size", "auto 100%", "important");
+        chatBox.style.setProperty("background-position", "center center", "important");
+        chatBox.style.setProperty("background-repeat", "no-repeat", "important");
+    }
+}
+function clearCharacterChatSession() {
+    characterChatSession = null;
+    window.ISAI_CHARACTER_CHAT_SESSION = null;
+    applyCharacterChatVisualState();
+}
+
+function extractCharacterPersonaPayload(options = {}) {
+    const root = (options && typeof options === "object") ? options : {};
+    const persona = (root.persona && typeof root.persona === "object") ? root.persona : {};
+    return {
+        name: persona.name ?? root.persona_name ?? root.personaName ?? "",
+        personality: persona.personality ?? root.persona_personality ?? root.personaPersonality ?? "",
+        speech_style: persona.speech_style ?? persona.speechStyle ?? root.persona_speech_style ?? root.personaSpeechStyle ?? "",
+        background: persona.background ?? root.persona_background ?? root.personaBackground ?? "",
+        opening_line: persona.opening_line ?? persona.openingLine ?? root.persona_opening_line ?? root.personaOpeningLine ?? "",
+        locale: persona.locale ?? root.persona_locale ?? root.personaLocale ?? root.locale ?? ""
+    };
+}
+
+function hasCharacterPersonaPayload(payload = {}) {
+    if (!payload || typeof payload !== "object") return false;
+    const fields = [payload.name, payload.personality, payload.speech_style, payload.speechStyle, payload.background];
+    return fields.some((value) => sanitizeCharacterChatText(value, 20).length > 0);
+}
+
+function normalizeCharacterLocale(raw) {
+    const text = String(raw || "").trim().toLowerCase().replace(/_/g, "-");
+    if (!text) return getCharacterChatUiLanguage();
+    if (/^[a-z]{2}(?:-[a-z]{2})?$/.test(text)) return text;
+    return getCharacterChatUiLanguage();
+}
+
+function buildCharacterPersonaSavePayload(session) {
+    if (!session || !session.persona) return null;
+    const sourceId = Number(session.sourceId || 0);
+    if (!sourceId) return null;
+    return {
+        id: sourceId,
+        persona: {
+            name: normalizeCharacterPersonaName(session.persona.name || ""),
+            personality: sanitizeCharacterChatText(session.persona.personality || "", 300),
+            speech_style: sanitizeCharacterChatText(session.persona.speechStyle || "", 300),
+            background: sanitizeCharacterChatText(session.persona.background || "", 420),
+            opening_line: sanitizeCharacterOpeningLine(session.persona.openingLine || getCharacterSessionOpeningLine(session)),
+            locale: normalizeCharacterLocale(session.locale || session.persona.locale || "")
+        }
+    };
+}
+
+async function saveCharacterPersonaToStore(session) {
+    const payload = buildCharacterPersonaSavePayload(session);
+    if (!payload) return false;
+    try {
+        const response = await fetch("re_store.php?action=save_gallery_persona", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const data = await parseJsonResponseSafe(response);
+        return !!(data && data.success);
+    } catch (error) {
+        return false;
+    }
+}
+
+async function generateCharacterPersonaForSession(session) {
+    const base = defaultCharacterChatPersona(session.prompt, session.nickname, session);
+    return {
+        name: normalizeCharacterPersonaName(base.name),
+        personality: sanitizeCharacterChatText(base.personality, 300),
+        speechStyle: sanitizeCharacterChatText(base.speechStyle, 300),
+        background: sanitizeCharacterChatText(base.background, 420),
+        openingLine: getCharacterSessionOpeningLine(session),
+        locale: normalizeCharacterLocale(session.locale || "")
+    };
+}
+
+async function startCharacterImageChat(options = {}) {
+    const imageUrl = String(options.imageUrl || "").trim();
+    if (!imageUrl) return false;
+
+    const prompt = normalizeCharacterChatPromptText(options.prompt || options.content || "");
+    const nickname = sanitizeCharacterChatText(options.nickname || options.name || "", 36);
+    const sourceId = Number(options.id || options.sourceId || 0) || null;
+    const rawPersonaPayload = extractCharacterPersonaPayload(options);
+    const hasStoredPersona = hasCharacterPersonaPayload(rawPersonaPayload);
+    const locale = normalizeCharacterLocale(rawPersonaPayload.locale || options.locale || "");
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    if (activeApp) {
+        try { exitAppMode(); } catch (error) {}
+    }
+    if (window.$boardApp && typeof window.$boardApp.closeCharacterChat === "function") {
+        try { window.$boardApp.closeCharacterChat(); } catch (error) {}
+    }
+    if (isMenuOpen) {
+        try { toggleStoreMenu(); } catch (error) {}
+    }
+    if (typeof closePreview === "function") {
+        try { closePreview(); } catch (error) {}
+    }
+    if (typeof setMode === "function") setMode("chat");
+
+    resetChat(true);
+    startExperience();
+
+    characterChatSession = {
+        active: true,
+        imageUrl,
+        prompt,
+        nickname,
+        sourceId,
+        persona: null,
+        locale
+    };
+    window.ISAI_CHARACTER_CHAT_SESSION = characterChatSession;
+    applyCharacterChatVisualState();
+
+    const introBubble = appendMsg("ai", "Character sync in progress...");
+    let persona = null;
+    if (hasStoredPersona) {
+        persona = normalizeCharacterPersonaPayload(rawPersonaPayload, prompt, nickname, characterChatSession);
+        persona.locale = locale;
+    } else {
+        persona = await generateCharacterPersonaForSession(characterChatSession);
+    }
+    persona.openingLine = getCharacterSessionOpeningLine(characterChatSession);
+    characterChatSession.persona = persona;
+    window.ISAI_CHARACTER_CHAT_SESSION = characterChatSession;
+    applyCharacterChatVisualState();
+
+    if (window.$boardApp && sourceId && window.$boardApp.items && Array.isArray(window.$boardApp.items.gallery)) {
+        const currentItem = window.$boardApp.items.gallery.find((item) => Number(item && item.id ? item.id : 0) === sourceId);
+        if (currentItem) {
+            currentItem.persona_name = persona.name || "";
+            currentItem.persona_personality = persona.personality || "";
+            currentItem.persona_speech_style = persona.speechStyle || "";
+            currentItem.persona_background = persona.background || "";
+            currentItem.persona_opening_line = persona.openingLine || "";
+            currentItem.persona_locale = normalizeCharacterLocale(persona.locale || locale || "");
+        }
+    }
+
+    if (!hasStoredPersona && sourceId) {
+        saveCharacterPersonaToStore(characterChatSession).catch(() => false);
+    }
+
+    const openingLine = sanitizeCharacterOpeningLine(getCharacterSessionOpeningLine(characterChatSession));
+    if (introBubble) {
+        introBubble.innerHTML = formatAiBubbleContent(openingLine);
+    } else {
+        appendMsg("ai", openingLine);
+    }
+    // Keep the opening line on UI only; API history should start from a user turn.
+    chatHistory = [];
+    scrollBottom();
+
+    const input = document.getElementById("prompt-input");
+    if (input) input.focus();
+    if (typeof showToast === "function") showToast("Character chat ready");
+    return true;
+}
+
+window.startCharacterImageChat = startCharacterImageChat;
+window.clearCharacterChatSession = clearCharacterChatSession;
+
+function hasCodeIntent(text) {
+    const value = String(text || "");
+    if (!value.trim()) return false;
+    return /(?:\b(html|css|javascript|typescript|node|react|vue|svelte|php|python|java|c\+\+|c#|sql|json|api|algorithm|function|class|code|coding|game|canvas)\b)/i.test(value);
+}
+
+function buildCodeAssistantPrompt(basePrompt) {
+    const hardRules = [
+        "You are an expert coding assistant.",
+        "When the user requests code, provide runnable code directly.",
+        "Never refuse coding only because you are an AI.",
+        "For HTML or JavaScript game requests, return a complete single-file HTML document with embedded CSS and JavaScript."
+    ].join(" ");
+    return [
+        String(basePrompt || "").trim(),
+        hardRules
+    ].filter(Boolean).join("\n\n");
 }
 
 function getCookieValue(name) {
@@ -344,8 +970,16 @@ async function loadAppDetails(id) {
     }
 }
 
-async function executeAction(side = "right") {
+async function executeAction(side = "right", options = {}) {
     if (typeof side !== "string") side = "right";
+    if (!options || typeof options !== "object") options = {};
+    const overrideText = typeof options.overrideText === "string" ? options.overrideText.trim() : "";
+    const silentUserBubble = !!options.silentUserBubble;
+    const forceGenerate = !!options.forceGenerate;
+    const isContinuationRequest = !!options.isContinuationRequest;
+    const previousContinueContext = options.previousContinueContext && typeof options.previousContinueContext === "object"
+        ? options.previousContinueContext
+        : null;
 
     if (side === "left" && currentMode === "voice") {
         if (isVoiceProcessing) return;
@@ -387,14 +1021,14 @@ async function executeAction(side = "right") {
     }
 
     const inputElement = document.getElementById("prompt-input");
-    const userText = inputElement.value.trim();
+    const userText = (overrideText || inputElement.value || "").trim();
 
-    if (isMenuOpen && userText) {
+    if (!forceGenerate && isMenuOpen && userText) {
         fetchStoreApps(userText);
         return;
     }
 
-    if (currentMode === "app") {
+    if (!forceGenerate && currentMode === "app") {
         inputElement.value = "";
         inputElement.style.height = "auto";
         fetchApps(userText);
@@ -410,10 +1044,17 @@ async function executeAction(side = "right") {
 
         if (typeof closePreview === "function") closePreview();
 
-        inputElement.value = "";
-        inputElement.style.height = "auto";
+        if (!overrideText) {
+            inputElement.value = "";
+            inputElement.style.height = "auto";
+        }
         showLoader(true);
-        appendMsg("user", userText);
+        if (!silentUserBubble) {
+            appendMsg("user", userText);
+        }
+        if (!isContinuationRequest) {
+            clearContinueWriteContext();
+        }
 
         if (abortController) abortController.abort();
         abortController = new AbortController();
@@ -553,20 +1194,20 @@ async function executeAction(side = "right") {
                     signal: abortController.signal
                 });
                 
-                // --- 수정된 부분: 안전한 JSON 파싱 ---
+                // --- ?섏젙??遺遺? ?덉쟾??JSON ?뚯떛 ---
                 const rawText = await response.text();
                 let data = {};
                 try {
                     data = parseJsonTextSafe(rawText);
                 } catch (e) {
-                    console.error("Search Data JSON 파싱 에러:", rawText);
-                    throw new Error("검색 서버로부터 올바른 데이터를 받지 못했습니다.");
+                    console.error("Search Data JSON ?뚯떛 ?먮윭:", rawText);
+                    throw new Error("寃???쒕쾭濡쒕????щ컮瑜??곗씠?곕? 諛쏆? 紐삵뻽?듬땲??");
                 }
                 // -------------------------------------
                 
                 if (data.results && data.results.length > 0) {
                     const topResults = data.results.slice(0, 5);
-                    let contextStr = topResults.map((item, idx) => `[문서 ${idx + 1}] ${item.content}`).join("\n");
+                    let contextStr = topResults.map((item, idx) => `[臾몄꽌 ${idx + 1}] ${item.content}`).join("\n");
                     
                     const synthResponse = await fetch("?action=search_synthesis", {
                         method: "POST",
@@ -574,14 +1215,14 @@ async function executeAction(side = "right") {
                         signal: abortController.signal
                     });
                     
-                    // --- 수정된 부분: 안전한 JSON 파싱 ---
+                    // --- ?섏젙??遺遺? ?덉쟾??JSON ?뚯떛 ---
                     const rawSynthText = await synthResponse.text();
                     let synthData = {};
                     try {
                         synthData = parseJsonTextSafe(rawSynthText);
                     } catch (e) {
-                        console.error("Search Synthesis JSON 파싱 에러:", rawSynthText);
-                        throw new Error("검색 요약 서버로부터 올바른 데이터를 받지 못했습니다.");
+                        console.error("Search Synthesis JSON ?뚯떛 ?먮윭:", rawSynthText);
+                        throw new Error("寃???붿빟 ?쒕쾭濡쒕????щ컮瑜??곗씠?곕? 諛쏆? 紐삵뻽?듬땲??");
                     }
                     // -------------------------------------
                     
@@ -592,8 +1233,8 @@ async function executeAction(side = "right") {
                         const bubble = appendMsg("ai", "...");
                         let localResult = "";
                         const localPrompt =[
-                            { role: "system", content: "넌 천재 요약봇." },
-                            { role: "user", content: `${contextStr}\n위 내용을 기반으로 답변해줘.` }
+                            { role: "system", content: "??泥쒖옱 ?붿빟遊?" },
+                            { role: "user", content: `${contextStr}\n???댁슜??湲곕컲?쇰줈 ?듬??댁쨾.` }
                         ];
                         
                         await runLocalInference(localPrompt, (token) => {
@@ -610,39 +1251,66 @@ async function executeAction(side = "right") {
                             scrollBottom();
                         }
                     } else if (synthData.error) {
-                        // 서버에서 에러 메시지를 보낸 경우 처리
-                        appendMsg("error", "검색 요약 오류: " + synthData.error);
+                        // ?쒕쾭?먯꽌 ?먮윭 硫붿떆吏瑜?蹂대궦 寃쎌슦 泥섎━
+                        appendMsg("error", "寃???붿빟 ?ㅻ쪟: " + synthData.error);
                     } else {
                         addSourcesToBubble(appendMsg("ai", synthData.html || "Thinking..."), topResults);
                     }
                 } else {
-                    appendMsg("ai", "검색 결과가 없습니다.");
+                    appendMsg("ai", "寃??寃곌낵媛 ?놁뒿?덈떎.");
                 }
             } else {
                 let finalPrompt = userText;
                 let currentHistory = chatHistory;
-                let sysPrompt = typeof SYSTEM_PROMPTS !== "undefined" && SYSTEM_PROMPTS[LANG] ? SYSTEM_PROMPTS[LANG] : "You are a helpful AI.";
+                let sysPrompt = "";
+                let shouldAttachSystemPrompt = false;
+                const characterSession = getCharacterChatSession();
+                const activeCategory = activeApp && activeApp.category ? String(activeApp.category).toLowerCase() : "";
+                const shouldForceCodePrompt = !characterSession && currentMode !== "blog" && (currentMode === "code" || activeCategory === "code");
+                if (Array.isArray(currentHistory)) {
+                    currentHistory = currentHistory.filter((msg) => {
+                        if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return false;
+                        return typeof msg.content === "string" && msg.content.trim() !== "";
+                    });
+                    while (currentHistory.length > 0 && currentHistory[0].role !== "user") {
+                        currentHistory.shift();
+                    }
+                } else {
+                    currentHistory = [];
+                }
                 
-                if (activeApp) {
-                    if (activeApp.system_prompt) sysPrompt = activeApp.system_prompt;
+                if (characterSession) {
+                    sysPrompt = buildCharacterChatSystemPrompt(characterSession);
+                    shouldAttachSystemPrompt = String(sysPrompt || "").trim() !== "";
+                } else if (activeApp) {
+                    if (activeApp.system_prompt) {
+                        sysPrompt = String(activeApp.system_prompt || "").trim();
+                        shouldAttachSystemPrompt = sysPrompt !== "";
+                    }
                 }
 
-                if (typeof window.buildIsaiSystemPrompt === "function") {
+                if (!characterSession && !shouldForceCodePrompt && shouldAttachSystemPrompt && typeof window.buildIsaiSystemPrompt === "function") {
                     sysPrompt = window.buildIsaiSystemPrompt(sysPrompt);
                 }
 
-                if (activeApp && activeApp.category === "Code") {
-                    finalPrompt = `System: ${sysPrompt}\n\nUser Request: ${userText}`;
+                if (shouldForceCodePrompt) {
+                    sysPrompt = buildCodeAssistantPrompt(shouldAttachSystemPrompt ? sysPrompt : "");
+                    shouldAttachSystemPrompt = String(sysPrompt || "").trim() !== "";
+                    finalPrompt = userText;
                 }
                 
                 if (currentMode === "blog") {
-                    finalPrompt = `Topic: "${userText}". Instructions: ${sysPrompt}. Lang: ${LANG === "ko" ? "Korean" : "English"}. Add [[IMG: keyword]] tags.`;
+                    if (shouldAttachSystemPrompt) {
+                        finalPrompt = `Topic: "${userText}". Instructions: ${sysPrompt}. Lang: ${LANG === "ko" ? "Korean" : "English"}. Add [[IMG: keyword]] tags.`;
+                    } else {
+                        finalPrompt = `Topic: "${userText}". Lang: ${LANG === "ko" ? "Korean" : "English"}. Add [[IMG: keyword]] tags.`;
+                    }
                     currentHistory =[];
                 }
 
                 if (isModelLoaded && isLocalActive) {
                     const localPromptArr =[
-                        { role: "system", content: sysPrompt },
+                        ...(shouldAttachSystemPrompt ? [{ role: "system", content: sysPrompt }] : []),
                         ...currentHistory.slice(-4),
                         { role: "user", content: finalPrompt }
                     ];
@@ -664,34 +1332,26 @@ async function executeAction(side = "right") {
                         let historyResult = localResult.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                         chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
                         if (currentMode === "blog") await processBlogImages(bubble);
+                        clearContinueWriteContext();
                         scrollBottom();
                     }
                 } else {
-                    const response = await fetch("?action=ai_chat", {
-                        method: "POST",
-                        body: JSON.stringify({
-                            prompt: finalPrompt,
-                            history: currentHistory,
-                            system_prompt: sysPrompt,
-                            max_chars: getIsaiApiMaxChars()
-                        }),
-                        signal: abortController.signal
-                    });
-                    
-                    const data = await parseJsonResponseSafe(response);
-                    
-                    if (data.error === "LIMIT_REACHED") {
-                        showToast("Limit reached. Local Model...");
-                        if (!isModelLoaded) await startDownload();
-                        
+                    const localPromptArr =[
+                        ...(shouldAttachSystemPrompt ? [{ role: "system", content: sysPrompt }] : []),
+                        ...currentHistory.slice(-4),
+                        { role: "user", content: finalPrompt }
+                    ];
+
+                    const runAutoLocalFallback = async (noticeText = "") => {
+                        if (noticeText && typeof showToast === "function") showToast(noticeText);
+                        const ready = await ensureLocalModelReadyForAutoFallback();
+                        if (!ready) {
+                            appendMsg("ai", "Error: Local model download was canceled.");
+                            return false;
+                        }
+
                         const bubble = appendMsg("ai", "...");
                         let localResult = "";
-                        const localPromptArr =[
-                            { role: "system", content: sysPrompt },
-                            ...currentHistory.slice(-4),
-                            { role: "user", content: finalPrompt }
-                        ];
-                        
                         await runLocalInference(localPromptArr, (token) => {
                             if (!stopSignal) {
                                 localResult += token;
@@ -699,23 +1359,116 @@ async function executeAction(side = "right") {
                                 scrollBottom();
                             }
                         });
-                        
+
                         if (!stopSignal) {
                             bubble.innerHTML = parseMarkdownLocal(localResult, true);
                             updateCodeUI(localResult);
                             let historyResult = localResult.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                             chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
                             if (currentMode === "blog") await processBlogImages(bubble);
+                            clearContinueWriteContext();
                             scrollBottom();
                         }
+                        return true;
+                    };
+
+                    const response = await fetch("?action=ai_chat", {
+                        method: "POST",
+                        body: JSON.stringify({
+                            prompt: finalPrompt,
+                            history: currentHistory,
+                            system_prompt: shouldAttachSystemPrompt ? sysPrompt : "",
+                            max_chars: shouldForceCodePrompt ? Math.max(getIsaiApiMaxChars(), 2200) : getIsaiApiMaxChars()
+                        }),
+                        signal: abortController.signal
+                    });
+                    
+                    const data = await parseJsonResponseSafe(response);
+                    
+                    if (data.error === "LIMIT_REACHED") {
+                        await runAutoLocalFallback("Limit reached. Local Model...");
                     } else if (data.response) {
-                        const bubble = appendMsg("ai", parseMarkdownLocal(data.response, true));
-                        updateCodeUI(data.response);
-                        let historyResult = data.response.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
-                        chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
+                        const renderedResponse = normalizeApiResponseForBubble(data.response, {
+                            isCodeMode: shouldForceCodePrompt,
+                            isTruncated: data.truncated === true
+                        });
+                        let bubble = null;
+                        let historyResult = "";
+                        let mergedForDisplay = renderedResponse;
+                        const hasContinuationTarget = isContinuationRequest && previousContinueContext && previousContinueContext.bubbleId;
+                        if (hasContinuationTarget) {
+                            const targetBubble = document.querySelector(`[data-continue-bubble-id="${previousContinueContext.bubbleId}"]`);
+                            if (targetBubble) {
+                                bubble = targetBubble;
+                                removeContinueIconFromBubble(bubble);
+                                const prevText = stripTruncatedTailNote(String(previousContinueContext.lastAssistant || ""));
+                                const nextText = stripTruncatedTailNote(String(renderedResponse || ""));
+                                mergedForDisplay = [prevText, nextText].filter(Boolean).join("\n\n").trim();
+                                bubble.innerHTML = parseMarkdownLocal(mergedForDisplay, true);
+                                updateCodeUI(mergedForDisplay);
+                                historyResult = mergedForDisplay.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+                                if (Array.isArray(chatHistory) && chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "assistant") {
+                                    chatHistory[chatHistory.length - 1].content = historyResult;
+                                } else {
+                                    chatHistory.push({ role: "assistant", content: historyResult });
+                                }
+                            }
+                        }
+                        if (!bubble) {
+                            bubble = appendMsg("ai", parseMarkdownLocal(renderedResponse, true));
+                            updateCodeUI(renderedResponse);
+                            historyResult = renderedResponse.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+                            if (!isContinuationRequest) {
+                                chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
+                            } else if (Array.isArray(chatHistory) && chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "assistant") {
+                                chatHistory[chatHistory.length - 1].content = historyResult;
+                            } else {
+                                chatHistory.push({ role: "assistant", content: historyResult });
+                            }
+                        }
+                        const bubbleContinueContext = {
+                            mode: currentMode,
+                            lastAssistant: historyResult,
+                            bubbleId: ensureContinueBubbleId(bubble)
+                        };
+                        if (shouldShowContinueIconForApiText(data.response, data.truncated === true)) {
+                            appendContinueIconInsideBubble(bubble, bubbleContinueContext);
+                        }
+                        if (data.truncated === true) {
+                            setContinueWriteContext(bubbleContinueContext);
+                        } else {
+                            clearContinueWriteContext();
+                        }
+                        scrollBottom();
                         
                         if (currentMode === "blog") await processBlogImages(bubble);
                         if (currentMode === "voice") speakText(data.response);
+                    } else if (data.error) {
+                        const errText = String(data.error || "");
+                        const shouldAutoFallback =
+                            /API_FAIL|RATE_LIMIT|HTTP\s*4\d\d|HTTP\s*5\d\d|INVALID_JSON|TIMEOUT|network|gateway|upstream|service unavailable/i.test(errText);
+                        if (shouldAutoFallback) {
+                            const ok = await runAutoLocalFallback("Server issue detected. Switching to local model...");
+                            if (ok) {
+                                if (isContinuationRequest && previousContinueContext) {
+                                    clearContinueWriteContext();
+                                }
+                                return;
+                            }
+                        }
+                        if (isContinuationRequest && previousContinueContext) {
+                            setContinueWriteContext(previousContinueContext);
+                        } else {
+                            clearContinueWriteContext();
+                        }
+                        appendMsg("ai", `Error: ${data.error}`);
+                    } else {
+                        if (isContinuationRequest && previousContinueContext) {
+                            setContinueWriteContext(previousContinueContext);
+                        } else {
+                            clearContinueWriteContext();
+                        }
+                        appendMsg("ai", "No response received.");
                     }
                 }
             }
@@ -729,8 +1482,11 @@ async function executeAction(side = "right") {
                 }
             }
         } catch (error) {
+            if (isContinuationRequest && previousContinueContext) {
+                setContinueWriteContext(previousContinueContext);
+            }
             if (error.name !== "AbortError") {
-                appendMsg("error", `오류: ${error.message}`);
+                appendMsg("error", `Error: ${error.message}`);
             }
         } finally {
             showLoader(false);
@@ -743,7 +1499,7 @@ async function executeAction(side = "right") {
         const password = document.getElementById("comm-password").value;
 
         if (!userText && (!fileInput.files || fileInput.files.length === 0)) {
-            showToast("내용이나 이미지를 입력해주세요.");
+            showToast("?댁슜?대굹 ?대?吏瑜??낅젰?댁＜?몄슂.");
             return;
         }
 
@@ -877,6 +1633,7 @@ function restoreDefaultChatInputProfile() {
 }
 
 function activateAppMode() {
+    clearCharacterChatSession();
     if (isMenuOpen) toggleStoreMenu();
     document.getElementById("active-app-status").classList.remove("hidden");
     document.getElementById("active-app-name").innerText = activeApp.title;
@@ -906,7 +1663,7 @@ async function fetchApps(query = "", append = false) {
         currentAppPage = 1;
         hasMoreApps = true;
         currentAppQuery = query;
-        // 기존에 있던 애니메이션(투명도 조절) 제거: grid.style.opacity = 0.5;
+        // 湲곗〈???덈뜕 ?좊땲硫붿씠???щ챸??議곗젅) ?쒓굅: grid.style.opacity = 0.5;
         grid.innerHTML = "";
     }
 
@@ -924,7 +1681,7 @@ async function fetchApps(query = "", append = false) {
             const data = await parseJsonResponseSafe(response);
 
             if (data && data.length > 0) {
-                // 불필요한 애니메이션 관련 클래스 토글 제거
+                // 遺덊븘?뷀븳 ?좊땲硫붿씠??愿???대옒???좉? ?쒓굅
                 data.forEach((app) => {
                     grid.appendChild(createAppItem(app));
                 });
@@ -945,7 +1702,7 @@ async function fetchApps(query = "", append = false) {
     } catch (error) {
         console.error("Error fetching apps:", error);
     } finally {
-        // 기존에 있던 투명도 원상복구 제거: grid.style.opacity = 1;
+        // 湲곗〈???덈뜕 ?щ챸???먯긽蹂듦뎄 ?쒓굅: grid.style.opacity = 1;
         isAppLoading = false;
     }
 }
@@ -1258,7 +2015,7 @@ function updateSubmitIcon(state, side = "right") {
     setVoiceState("left", state === "mic" || state === "default" ? "idle" : state);
 }
 
-function showPopup(title, msg, confirmCallback) {
+function showPopup(title, msg, confirmCallback, cancelCallback) {
     const layer = document.getElementById("modal-layer");
     document.getElementById("modal-title").innerText = title;
     document.getElementById("modal-msg").innerText = msg;
@@ -1280,6 +2037,9 @@ function showPopup(title, msg, confirmCallback) {
     };
     newCancel.onclick = () => {
         closePopup();
+        if (typeof cancelCallback === "function") {
+            cancelCallback();
+        }
     };
 
     layer.classList.add("show");
@@ -1287,6 +2047,36 @@ function showPopup(title, msg, confirmCallback) {
 
 function closePopup() {
     document.getElementById("modal-layer").classList.remove("show");
+}
+
+async function ensureLocalModelReadyForAutoFallback() {
+    if (isModelLoaded) {
+        isLocalActive = true;
+        updateLocalBtnState();
+        return true;
+    }
+
+    if (isModelDownloaded && !isModelLoaded) {
+        isLocalActive = true;
+        syncLocalModelTierVisibility();
+        await startDownload();
+        return !!isModelLoaded;
+    }
+
+    const accepted = await new Promise((resolve) => {
+        showPopup(
+            getLocalModelPopupTitle(),
+            getLocalModelPopupMessage(),
+            async () => {
+                isLocalActive = true;
+                syncLocalModelTierVisibility();
+                await startDownload();
+                resolve(!!isModelLoaded);
+            },
+            () => resolve(false)
+        );
+    });
+    return !!accepted;
 }
 
 function updateLocalBtnState() {
@@ -1329,20 +2119,20 @@ function getLocalModelProfiles() {
     return {
         light: {
             key: "light",
-            label: "라이트",
+            label: "Light",
             fallbackUrl: "",
             popupSizeText: "257MB",
             preferredRuntime: "wllama"
         },
         middle: {
             key: "middle",
-            label: "중간",
+            label: "Middle",
             fallbackUrl: "",
             preferredRuntime: "wllama"
         },
         hard: {
             key: "hard",
-            label: "하드",
+            label: "Hard",
             fallbackUrl: "",
             preferredRuntime: "wllama"
         }
@@ -1409,7 +2199,7 @@ function getLocalRuntimeStorageKey() {
 
 function getLocalModelPopupTitle() {
     const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
-    if (locale.startsWith("ko")) return "로컬 모델 다운로드";
+    if (locale.startsWith("ko")) return "濡쒖뺄 紐⑤뜽 ?ㅼ슫濡쒕뱶";
     return "Download Local Model";
 }
 
@@ -1419,15 +2209,15 @@ function getLocalModelPopupMessage() {
     if (locale.startsWith("ko")) {
         if (profile && profile.key === "light") {
             const sizeText = profile.popupSizeText || "257MB";
-            return `LFM2.5 350M 모델(${sizeText})을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?`;
+            return `LFM2.5 350M 紐⑤뜽(${sizeText})???ㅼ슫濡쒕뱶???ㅽ봽?쇱씤 紐⑤뱶瑜??ъ슜?⑸땲?? 怨꾩냽?좉퉴??`;
         }
         if (profile && profile.key === "middle") {
-            return "LFM2.5 350M Q6_K 모델을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?";
+            return "LFM2.5 350M Q6_K 紐⑤뜽???ㅼ슫濡쒕뱶???ㅽ봽?쇱씤 紐⑤뱶瑜??ъ슜?⑸땲?? 怨꾩냽?좉퉴??";
         }
         if (profile && profile.key === "hard") {
-            return "Qwen3 0.6B IQ4_XS 모델을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?";
+            return "Qwen3 0.6B IQ4_XS 紐⑤뜽???ㅼ슫濡쒕뱶???ㅽ봽?쇱씤 紐⑤뱶瑜??ъ슜?⑸땲?? 怨꾩냽?좉퉴??";
         }
-        return "로컬 모델을 다운로드해 오프라인 모드를 사용합니다. 계속할까요?";
+        return "濡쒖뺄 紐⑤뜽???ㅼ슫濡쒕뱶???ㅽ봽?쇱씤 紐⑤뱶瑜??ъ슜?⑸땲?? 怨꾩냽?좉퉴??";
     }
     if (profile && profile.key === "light") {
         const sizeText = profile.popupSizeText || "257MB";
@@ -1524,8 +2314,8 @@ function setLocalModelTier(tierKey) {
         const safeReadySuffix = isModelDownloaded ? " (\ub2e4\uc6b4\ub85c\ub4dc\ub428)" : "";
         showToast(`${getLocalizedLocalModelTierLabel(nextTier)} \ubaa8\ub378 \uc120\ud0dd${safeReadySuffix}`);
         return;
-        const readySuffix = isModelDownloaded ? " (다운로드됨)" : "";
-        showToast(`${getLocalizedLocalModelTierLabel(nextTier)} 모델 선택${readySuffix}`);
+        const readySuffix = isModelDownloaded ? " (?ㅼ슫濡쒕뱶??" : "";
+        showToast(`${getLocalizedLocalModelTierLabel(nextTier)} 紐⑤뜽 ?좏깮${readySuffix}`);
     }
 }
 window.setLocalModelTier = setLocalModelTier;
@@ -1554,17 +2344,6 @@ function getLocalizedLocalModelTierLabel(tierKey) {
     };
     const safeTable = safeLabels[locale] || safeLabels.en;
     return safeTable[key] || safeLabels.en[key] || getLocalModelTierLabelFallback(key);
-    const labels = {
-        ko: { code: "코드", light: "라이트", middle: "중간", hard: "하드" },
-        ja: { code: "コード", light: "ライト", middle: "ミドル", hard: "ハード" },
-        zh: { code: "代码", light: "轻量", middle: "中等", hard: "高性能" },
-        es: { code: "Código", light: "Ligero", middle: "Medio", hard: "Avanzado" },
-        pt: { code: "Código", light: "Leve", middle: "Médio", hard: "Pesado" },
-        hi: { code: "कोड", light: "लाइट", middle: "मिड", hard: "हार्ड" },
-        en: { code: "Code", light: "Light", middle: "Middle", hard: "Hard" }
-    };
-    const table = labels[locale] || labels.en;
-    return table[key] || labels.en[key] || getLocalModelTierLabelFallback(key);
 }
 
 function normalizeLocalModelProfile(tierKey, rawProfile) {
@@ -2127,15 +2906,20 @@ function sanitizeAiHtmlLocal(value) {
 
 function formatAiBubbleContent(content) {
     const raw = String(content ?? "");
-    const decoded = decodeHtmlEntitiesLocal(raw);
-    const sanitizedDecoded = sanitizeAiHtmlLocal(decoded);
+    // IMPORTANT:
+    // Do not decode HTML entities globally here.
+    // If we decode first, code blocks that intentionally contain `&lt;...&gt;`
+    // become real tags and get rendered instead of shown as code.
     const sanitizedRaw = sanitizeAiHtmlLocal(raw);
-    const htmlCandidate = /<\/?[a-z][^>]*>/i.test(sanitizedDecoded) ? sanitizedDecoded : sanitizedRaw;
 
-    if (/<\/?[a-z][^>]*>/i.test(htmlCandidate)) {
-        return htmlCandidate;
+    if (/<\/?[a-z][^>]*>/i.test(sanitizedRaw)) {
+        return sanitizedRaw;
     }
-    return htmlCandidate.replace(/\n/g, "<br>");
+
+    // Preserve legacy encoded line breaks only.
+    return sanitizedRaw
+        .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+        .replace(/\n/g, "<br>");
 }
 
 function isImageErrorMessageLocal(value) {
@@ -2174,11 +2958,11 @@ function appendMsg(role, content) {
 
     const bubble = document.createElement("div");
     if (role === "user") {
-        bubble.className = "self-end px-4 py-2.5 rounded-[18px] rounded-tr-none max-w-[85%] shadow mb-3 text-sm break-words ml-auto";
+        bubble.className = "chat-bubble-user self-end px-4 py-2.5 rounded-[18px] rounded-tr-none max-w-[85%] shadow mb-3 text-sm break-words ml-auto";
         bubble.style.backgroundColor = "var(--accent, #3b82f6)";
         bubble.style.color = "var(--accent-text, #ffffff)";
     } else {
-        bubble.className = "self-start px-4 py-2.5 rounded-[18px] rounded-tl-none max-w-[85%] mb-3 text-sm break-words leading-relaxed shadow-sm";
+        bubble.className = "chat-bubble-ai self-start px-4 py-2.5 rounded-[18px] rounded-tl-none max-w-[85%] mb-3 text-sm break-words leading-relaxed shadow-sm";
         bubble.style.backgroundColor = "var(--bg-island, #ffffff)";
         bubble.style.color = "var(--text-main, #333333)";
         if (currentMode === "search") {
@@ -2316,7 +3100,7 @@ function scrollBottom() {
 function parseMarkdownLocal(text, isFinished = false) {
     window.extractedCodes =[];
     
-    // 1. 생각 과정(<think>...</think>) 분리
+    // 1. ?앷컖 怨쇱젙(<think>...</think>) 遺꾨━
     let thinkContent = "";
     let mainContent = text;
     
@@ -2337,8 +3121,9 @@ function parseMarkdownLocal(text, isFinished = false) {
         const isThinking = (!isFinished) && (text.indexOf("</think>") === -1);
         const formattedThink = thinkContent.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
         
-        const displayStyle = isThinking ? "block" : "none";
-        const iconRotate = isThinking ? "rotate(180deg)" : "rotate(0deg)";
+        // Show think content by default whenever it exists (user can still collapse manually).
+        const displayStyle = "block";
+        const iconRotate = "rotate(180deg)";
         
         html += `
         <div class="my-3 rounded-xl border border-white/10 bg-[#1e1e1e] shadow-sm overflow-hidden w-full max-w-full transition-all">
@@ -2354,17 +3139,17 @@ function parseMarkdownLocal(text, isFinished = false) {
         </div>`;
     }
 
-    // 2. 전체 HTML 이스케이프 (안전장치: 쌩 HTML이 페이지 UI를 망가뜨리는 것 원천 차단)
+    // 2. ?꾩껜 HTML ?댁뒪耳?댄봽 (?덉쟾?μ튂: ??HTML???섏씠吏 UI瑜?留앷??⑤━??寃??먯쿇 李⑤떒)
     let processedMain = mainContent.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
     const blocks =[];
     let counter = 0;
 
     function createBlockUI(lang, code, isStreaming) {
-        const blockId = "local-code-" + counter++;
+        counter++;
         lang = lang || "text";
         
-        // 우측 코드 에디터 및 복사 기능을 위해 원본 코드로 복구하여 배열에 저장
+        // ?곗륫 肄붾뱶 ?먮뵒??諛?蹂듭궗 湲곕뒫???꾪빐 ?먮낯 肄붾뱶濡?蹂듦뎄?섏뿬 諛곗뿴?????
         let cleanCode = code.replace(/&lt;/g, "<").replace(/&gt;/g, ">");
         window.extractedCodes.push({ 
             lang: lang, 
@@ -2372,24 +3157,24 @@ function parseMarkdownLocal(text, isFinished = false) {
             name: `File ${window.extractedCodes.length + 1} (${lang})` 
         });
 
-        const blink = isStreaming ? ' <span class="animate-pulse">...</span>' : '';
-        const uiBlock = `<div class="code-wrapper my-4 rounded-lg overflow-hidden border border-white/10 bg-[#1e1e1e] shadow-lg"><div class="flex justify-between items-center px-4 py-2 bg-white/5 border-b border-white/5"><span class="text-xs text-gray-200 font-mono uppercase">${lang}${blink}</span><div class="flex items-center gap-3"><button onclick="openFullEditor('${blockId}')" class="flex md:hidden items-center gap-1 text-xs text-blue-300 hover:text-blue-200 transition"><i class="ri-code-box-line"></i> Edit</button><button onclick="copyCode('${blockId}')" class="flex items-center gap-1 text-xs text-gray-200 hover:text-white transition group"><i class="ri-file-copy-line"></i> <span class="group-hover:underline">Copy</span></button></div></div><div class="relative overflow-x-auto code-scroll"><pre id="${blockId}" class="p-4 text-sm font-mono leading-relaxed w-max min-w-full text-gray-50"><code>${code}</code></pre></div></div>`;
-        
+        const streamingClass = isStreaming ? " is-streaming" : "";
+        const languageLabel = lang ? `<div class="chat-code-label">${lang}</div>` : "";
+        const uiBlock = `${languageLabel}<pre class="chat-code-block${streamingClass}"><code>${code}</code></pre>`;        
         blocks.push(uiBlock);
         return "###CODE_BLOCK_" + (blocks.length - 1) + "###";
     }
 
-    // 3. 완전히 닫힌 코드 블록 처리
+    // 3. ?꾩쟾???ロ엺 肄붾뱶 釉붾줉 泥섎━
     processedMain = processedMain.replace(/```([a-zA-Z0-9_\-\+]*)[ \t]*\n?([\s\S]*?)```/g, (match, lang, code) => {
         return createBlockUI(lang, code, false);
     });
 
-    // 4. 작성 중이라 아직 닫히지 않은 코드 블록 처리 (스트리밍 대응)
+    // 4. ?묒꽦 以묒씠???꾩쭅 ?ロ엳吏 ?딆? 肄붾뱶 釉붾줉 泥섎━ (?ㅽ듃由щ컢 ???
     processedMain = processedMain.replace(/```([a-zA-Z0-9_\-\+]*)[ \t]*\n?([\s\S]*)$/g, (match, lang, code) => {
         return createBlockUI(lang, code, !isFinished);
     });
 
-    // 5. 인라인 코드 및 기본 마크다운 변환
+    // 5. ?몃씪??肄붾뱶 諛?湲곕낯 留덊겕?ㅼ슫 蹂??
     processedMain = processedMain.replace(/`([^`]+)`/g, (match, inlineCode) => {
         return `<code class="bg-white/20 px-1.5 py-0.5 rounded text-white font-bold font-mono text-sm border border-white/10">${inlineCode}</code>`;
     })
@@ -2399,7 +3184,7 @@ function parseMarkdownLocal(text, isFinished = false) {
     .replace(/^[\-\*]\s+(.*)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
     .replace(/\n/g, "<br>");
 
-    // 6. 생성해둔 UI 블록을 원래 위치에 삽입
+    // 6. ?앹꽦?대몦 UI 釉붾줉???먮옒 ?꾩튂???쎌엯
     blocks.forEach((blockHtml, index) => {
         processedMain = processedMain.replace("###CODE_BLOCK_" + index + "###", blockHtml);
     });
@@ -2652,8 +3437,9 @@ function switchTab(index) {
     }
 }
 
-function resetChat() {
+function resetChat(silent = false) {
     if (isGenerating) stopGeneration();
+    clearCharacterChatSession();
     
     chatHistory =[];
     codeFiles =[];
@@ -2680,7 +3466,9 @@ function resetChat() {
     
     document.getElementById("prompt-input").value = "";
     setMode("chat");
-    showToast("Chat Reset Completed");
+    if (!silent && typeof showToast === "function") {
+        showToast("Chat Reset Completed");
+    }
 }
 
 async function processBlogImages(element) {
@@ -2761,3 +3549,4 @@ window.toggleThink = function(headerEl) {
         iconEl.style.transform = 'rotate(0deg)';
     }
 };
+

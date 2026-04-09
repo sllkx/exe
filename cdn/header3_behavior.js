@@ -104,6 +104,7 @@
         }
         window.copyCodeEditorContent = copyCodeEditorContent;
         const HTML_PREVIEW_STORAGE_KEY = 'ISAI_HTML_PREVIEW_ENABLED';
+        try { localStorage.setItem(HTML_PREVIEW_STORAGE_KEY, '0'); } catch (e) {}
         function isHtmlPreviewEnabled() {
             return localStorage.getItem(HTML_PREVIEW_STORAGE_KEY) === '1';
         }
@@ -111,6 +112,17 @@
             const value = String(text || '').trim().toLowerCase();
             if (!value) return false;
             return value.includes('<html') || value.includes('<body') || value.includes('<div') || value.includes('<script') || value.includes('<!doctype html');
+        }
+        function injectPreviewReset(htmlText) {
+            const resetStyle = '<style id="isai-preview-reset">html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;}body{box-sizing:border-box;}*,*:before,*:after{box-sizing:inherit;}</style>';
+            const html = String(htmlText || '');
+            if (/<head[^>]*>/i.test(html)) {
+                return html.replace(/<head[^>]*>/i, function(match){ return match + resetStyle; });
+            }
+            if (/<html[^>]*>/i.test(html)) {
+                return html.replace(/<html[^>]*>/i, function(match){ return match + '<head>' + resetStyle + '</head>'; });
+            }
+            return '<!doctype html><html><head>' + resetStyle + '</head><body>' + html + '</body></html>';
         }
         function setHtmlPreviewButtonState(enabled) {
             const btn = document.getElementById('code-html-preview-toggle');
@@ -123,8 +135,8 @@
             if (!frame || !editor) return;
             const codeText = String(editor.value || '');
             const previewHtml = looksLikeHtmlDocument(codeText)
-                ? codeText
-                : `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:24px;background:#0f1115;color:#f3f4f6;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}pre{white-space:pre-wrap;word-break:break-word}</style></head><body><pre>${codeText.replace(/[&<>]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[ch]; })}</pre></body></html>`;
+                ? injectPreviewReset(codeText)
+                : `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%;height:100%;background:#0f1115;color:#f3f4f6;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}pre{margin:0;padding:0;white-space:pre-wrap;word-break:break-word}</style></head><body><pre>${codeText.replace(/[&<>]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[ch]; })}</pre></body></html>`;
             frame.srcdoc = previewHtml;
         }
         function clearHtmlPreview() {
@@ -153,11 +165,7 @@
         function bindHtmlPreviewEditor() {
             const editor = document.getElementById('code-editor');
             if (!editor || editor.dataset.previewBound === '1') return;
-            const sync = function () {
-                if (isHtmlPreviewEnabled()) refreshHtmlPreview();
-            };
-            editor.addEventListener('input', sync);
-            editor.addEventListener('keyup', sync);
+            // Manual refresh mode: do not auto-render on editor input.
             editor.dataset.previewBound = '1';
         }
         window.toggleHtmlPreview = toggleHtmlPreview;
@@ -607,6 +615,9 @@
 
         function setMode(mode) {
             mode = mode || 'chat';
+            if (mode !== 'chat' && typeof window.clearCharacterChatSession === 'function') {
+                try { window.clearCharacterChatSession(); } catch (error) {}
+            }
             if (document.body) document.body.setAttribute('data-ui-mode', mode);
             if (typeof window.setStoreMenuState === 'function') {
                 window.setStoreMenuState(false);

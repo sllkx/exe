@@ -296,16 +296,10 @@ async function performVoiceConversationRequest(text) {
 
     try {
         let finalPrompt = userText;
-        let sysPrompt = (typeof SYSTEM_PROMPTS !== 'undefined' && SYSTEM_PROMPTS[LANG])
-            ? SYSTEM_PROMPTS[LANG]
-            : 'You are a helpful AI.';
+        let sysPrompt = '';
 
         if (typeof activeApp !== 'undefined' && activeApp && activeApp.system_prompt) {
-            sysPrompt = activeApp.system_prompt;
-        }
-
-        if (typeof window.buildIsaiSystemPrompt === 'function') {
-            sysPrompt = window.buildIsaiSystemPrompt(sysPrompt);
+            sysPrompt = String(activeApp.system_prompt || '').trim();
         }
 
         const history = Array.isArray(chatHistory) ? chatHistory.slice(-6) : [];

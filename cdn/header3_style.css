@@ -210,16 +210,17 @@ select option {
             pointer-events: none !important;
             overflow: hidden !important;
         }
-        .flag-select-menu {
-            position: absolute;
-            top: calc(100% + 8px);
-            left: 50%;
-            right: auto;
-            transform: translateX(-50%);
-            background: #0f1012;
-            border: 1px solid rgba(255,255,255,0.14);
-            border-radius: 12px;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+.flag-select-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: auto;
+    transform: none;
+    display: none;
+    background: #0f1012;
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.35);
             padding: 4px 3px;
             z-index: 360;
             max-height: 210px;
@@ -271,12 +272,23 @@ select option {
         .flag-select-item-code {
             display: none !important;
         }
-        .flag-select-item-name {
-            display: none !important;
-        }
-        .flag-select-menu {
-            scrollbar-color: rgba(255,255,255,0.22) transparent;
-        }
+.flag-select-item-name {
+    display: none !important;
+}
+.flag-select-menu.hidden {
+    display: none !important;
+}
+.flag-select-menu:not(.hidden) {
+    display: block;
+}
+#translation-right-wrapper .flag-select-menu {
+    left: auto;
+    right: 0;
+    transform: none;
+}
+.flag-select-menu {
+    scrollbar-color: rgba(255,255,255,0.22) transparent;
+}
         .flag-select-menu::-webkit-scrollbar {
             width: 4px;
         }
@@ -713,17 +725,27 @@ select option {
         #chat-input-actions .input-action-btn:hover {
             background: rgba(28, 28, 31, 0.62);
         }
-        #chat-input-actions #btn-submit {
-            width: 30px;
-            height: 30px;
-            background: rgba(10, 10, 11, 0.68) !important;
-            color: #ffffff !important;
-        }
-        #chat-input-actions .recent-mode-btn {
-            background: rgba(18, 18, 20, 0.42) !important;
-            color: #ffffff !important;
-            opacity: 1;
-        }
+#chat-input-actions #btn-submit {
+    width: 30px;
+    height: 30px;
+    background: rgba(10, 10, 11, 0.68) !important;
+    color: #ffffff !important;
+}
+#chat-input-actions #btn-continue-writing {
+    width: 30px;
+    height: 30px;
+    background: rgba(25, 25, 28, 0.72) !important;
+    color: #f5d37a !important;
+}
+#chat-input-actions #btn-continue-writing:hover {
+    background: rgba(36, 36, 41, 0.82) !important;
+    color: #ffe49e !important;
+}
+#chat-input-actions .recent-mode-btn {
+    background: rgba(18, 18, 20, 0.42) !important;
+    color: #ffffff !important;
+    opacity: 1;
+}
         #chat-input-actions .recent-mode-btn:hover {
             background: rgba(28, 28, 31, 0.62) !important;
         }

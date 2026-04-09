@@ -386,7 +386,10 @@
         const code = String(selected.dataset.code || selected.textContent || selected.value || "").trim().toUpperCase();
         const flag = String(selected.dataset.flag || "").trim();
 
-        if (label) label.textContent = code || selected.value;
+        if (label) {
+            label.textContent = code || selected.value;
+            label.style.display = "none";
+        }
         if (img) {
             img.src = flag || "";
             img.alt = `${selected.value} flag`;
@@ -401,7 +404,10 @@
             if (exceptRoot && root === exceptRoot) return;
             const trigger = root.querySelector(".flag-select-trigger");
             const menu = root.querySelector(".flag-select-menu");
-            if (menu) menu.classList.add("hidden");
+            if (menu) {
+                menu.classList.add("hidden");
+                menu.style.display = "none";
+            }
             if (trigger) trigger.setAttribute("aria-expanded", "false");
         });
     }
@@ -411,17 +417,24 @@
         if (!root) return;
         const menu = root.querySelector(".flag-select-menu");
         if (!menu) return;
+        menu.style.display = menu.classList.contains("hidden") ? "none" : "block";
 
         const options = Array.from(select.options || []);
         menu.innerHTML = options.map((option, index) => {
             const code = String(option.dataset.code || option.textContent || option.value || "").trim().toUpperCase();
             const flag = String(option.dataset.flag || "").trim();
             const isActive = option.value === select.value;
+            const label = `${code} ${option.value}`.trim();
             return `
-                <button type="button" class="flag-select-item${isActive ? " is-active" : ""}" data-option-index="${index}" role="option" aria-selected="${isActive ? "true" : "false"}">
+                <button type="button"
+                    class="flag-select-item${isActive ? " is-active" : ""}"
+                    data-option-index="${index}"
+                    role="option"
+                    aria-selected="${isActive ? "true" : "false"}"
+                    aria-label="${escapeHtml(label)}"
+                    title="${escapeHtml(option.value)}"
+                    style="display:flex;align-items:center;justify-content:center;width:100%;height:32px;padding:0;border:0;background:transparent;border-radius:9px;cursor:pointer;">
                     <img class="flag-select-img" src="${escapeHtml(flag)}" alt="${escapeHtml(option.value)} flag" loading="lazy" decoding="async">
-                    <span class="flag-select-item-code">${escapeHtml(code)}</span>
-                    <span class="flag-select-item-name">${escapeHtml(option.value)}</span>
                 </button>
             `;
         }).join("");
@@ -495,9 +508,11 @@
                 if (willOpen) {
                     renderFlagSelectMenu(select);
                     menu.classList.remove("hidden");
+                    menu.style.display = "block";
                     trigger.setAttribute("aria-expanded", "true");
                 } else {
                     menu.classList.add("hidden");
+                    menu.style.display = "none";
                     trigger.setAttribute("aria-expanded", "false");
                 }
             });
@@ -522,6 +537,17 @@
         renderFlagSelectMenu(rightSelect);
         syncFlagSelectTrigger(leftSelect);
         syncFlagSelectTrigger(rightSelect);
+        [leftSelect, rightSelect].forEach((select) => {
+            const root = select.closest(".flag-select");
+            if (!root) return;
+            const trigger = root.querySelector(".flag-select-trigger");
+            const menu = root.querySelector(".flag-select-menu");
+            if (menu) {
+                menu.classList.add("hidden");
+                menu.style.display = "none";
+            }
+            if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
 
         if (!window.__isaiTranslateOutsideClickBound) {
             window.__isaiTranslateOutsideClickBound = true;
@@ -554,6 +580,11 @@
         }
         const fallbackMessage = DEFAULT_WELCOME_MESSAGES[uiLanguage] || DEFAULT_WELCOME_MESSAGES.en;
         return normalizeWelcomeMessage(fallbackMessage, uiLanguage);
+    }
+
+    function hasActiveCharacterChatSession() {
+        const session = window.ISAI_CHARACTER_CHAT_SESSION;
+        return !!(session && session.active);
     }
 
     function getAssistantInfo() {
@@ -608,7 +639,7 @@
         }
         if (badge) badge.textContent = meta.badge;
         if (hint) hint.textContent = meta.hint;
-        if (input) input.placeholder = "";
+        if (input && !hasActiveCharacterChatSession()) input.placeholder = "";
         if (submitButton) {
             submitButton.style.display = "inline-flex";
         }
@@ -804,6 +835,7 @@
     }
 
     function ensureWelcomeMessage(force = false) {
+        if (hasActiveCharacterChatSession()) return;
         const chatBox = document.getElementById("chat-box");
         if (!chatBox) return;
         if (force) chatBox.innerHTML = "";
@@ -834,6 +866,10 @@
         resetChat = function () {
             const result = originalResetChat.apply(this, arguments);
             setTimeout(() => {
+                if (hasActiveCharacterChatSession()) {
+                    updateComposerMeta(getCurrentMode());
+                    return;
+                }
                 ensureWelcomeMessage(true);
                 updateComposerMeta("chat");
             }, 0);
@@ -1013,10 +1049,12 @@
             ? (window.getIsaiAssistantSettings() || {})
             : loadAssistantSettings();
         const assistantTone = ASSISTANT_TONES.find((item) => item.id === settings.tone) || ASSISTANT_TONES[0];
+        const codingCompatibilityRule = "If the user asks for coding help, provide practical code and do not refuse only because you are an AI.";
         return [
             String(basePrompt || "").trim(),
             String(settings.systemPrompt || "").trim(),
-            assistantTone.instruction
+            assistantTone.instruction,
+            codingCompatibilityRule
         ].filter(Boolean).join("\n\n");
     }
 

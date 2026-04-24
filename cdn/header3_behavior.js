@@ -831,6 +831,105 @@ if (imgModalLayer) {
     });
 }
 
+function getImageReportI18n() {
+    return window.__ISAI_IMAGE_REPORT_I18N__ || {};
+}
+
+function getCurrentShareContext() {
+    const ctx = window.__ISAI_SHARE_CONTEXT__ || {};
+    return {
+        id: Number(ctx.id || 0) || 0,
+        isShared: !!ctx.isShared
+    };
+}
+
+function openImageShareReportModal() {
+    const i18n = getImageReportI18n();
+    const context = getCurrentShareContext();
+    if (!context.isShared || !context.id) {
+        if (typeof showToast === 'function') showToast('Saved image post not found.');
+        return;
+    }
+    const modal = document.getElementById('image-report-modal');
+    const typeSelect = document.getElementById('image-report-type');
+    const textarea = document.getElementById('image-report-reason');
+    if (typeSelect) typeSelect.value = '';
+    document.querySelectorAll('#image-report-modal .report-type-chip').forEach(function (chip) {
+        chip.classList.remove('active');
+    });
+    if (textarea) textarea.value = '';
+    if (modal) modal.classList.remove('hidden');
+    if (textarea) textarea.focus();
+}
+
+function closeImageShareReportModal() {
+    const modal = document.getElementById('image-report-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function submitImageShareReport() {
+    const i18n = getImageReportI18n();
+    const context = getCurrentShareContext();
+    const typeSelect = document.getElementById('image-report-type');
+    const textarea = document.getElementById('image-report-reason');
+    const reportType = String(typeSelect?.value || '').trim();
+    const reason = String(textarea?.value || '').trim();
+    if (!context.isShared || !context.id) {
+        if (typeof showToast === 'function') showToast('Saved image post not found.');
+        return;
+    }
+    if (!reportType) {
+        if (typeof showToast === 'function') showToast(i18n.typeRequired || 'Please select a report type.');
+        return;
+    }
+    if (!reason) {
+        if (typeof showToast === 'function') showToast(i18n.reasonRequired || 'Please enter a report reason.');
+        return;
+    }
+    try {
+        const res = await fetch('/re_store.php?action=submit_content_report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target_type: 'gallery',
+                target_id: context.id,
+                report_type: reportType,
+                reason
+            })
+        });
+        const data = await res.json();
+        if (!data || !data.success) {
+            throw new Error((data && data.error) || 'REPORT_FAILED');
+        }
+        closeImageShareReportModal();
+        if (data.deleted) {
+            if (typeof showToast === 'function') showToast(i18n.deleted || 'The post was removed after repeated reports.');
+            window.setTimeout(() => { window.location.href = '/'; }, 700);
+            return;
+        }
+        if (typeof showToast === 'function') {
+            showToast(data.reported ? (i18n.reported || 'Report submitted.') : (i18n.duplicate || 'You already reported this post this month.'));
+        }
+    } catch (error) {
+        console.error(error);
+        if (typeof showToast === 'function') showToast(i18n.error || 'An error occurred while submitting the report.');
+    }
+}
+
+function chooseImageReportType(type, buttonEl) {
+    const input = document.getElementById('image-report-type');
+    if (input) input.value = String(type || '');
+    document.querySelectorAll('#image-report-modal .report-type-chip').forEach(function (chip) {
+        chip.classList.remove('active');
+    });
+    if (buttonEl && buttonEl.classList) buttonEl.classList.add('active');
+}
+
+window.openImageShareReportModal = openImageShareReportModal;
+window.closeImageShareReportModal = closeImageShareReportModal;
+window.submitImageShareReport = submitImageShareReport;
+window.chooseImageReportType = chooseImageReportType;
+
 function __getDefaultChatGreeting() {
     const serverI18n = window.ISAI_SERVER_I18N || {};
     if (serverI18n.welcomeMessage) return serverI18n.welcomeMessage;
@@ -916,16 +1015,39 @@ function __getDefaultChatGreeting() {
 */
 
 function __normalizeDefaultGreeting(message, localeHint) {
-    const raw = String(message || "").replace(/\s+/g, " ").trim();
+    const decodeEscaped = (value) => {
+        let text = String(value || "");
+        for (let i = 0; i < 3; i++) {
+            text = text
+                .replace(/\\\\u([0-9a-fA-F]{4})/g, function (_, hex) {
+                    return String.fromCharCode(parseInt(hex, 16));
+                })
+                .replace(/\\u([0-9a-fA-F]{4})/g, function (_, hex) {
+                    return String.fromCharCode(parseInt(hex, 16));
+                })
+                .replace(/\\\\x([0-9a-fA-F]{2})/g, function (_, hex) {
+                    return String.fromCharCode(parseInt(hex, 16));
+                })
+                .replace(/\\x([0-9a-fA-F]{2})/g, function (_, hex) {
+                    return String.fromCharCode(parseInt(hex, 16));
+                });
+        }
+        return text;
+    };
+    const raw = decodeEscaped(message).replace(/\s+/g, " ").trim();
     if (!raw) return "";
     const isKoreanLocale = String(localeHint || "").toLowerCase().startsWith("ko");
     const hasKoreanText = /[\u3131-\u318e\uac00-\ud7a3]/.test(raw);
     const hasLegacyPhrase = /\ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694|\ubb50\s*\ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694/.test(raw);
+    const hasEnglishLegacy = /hello!\s*how can i help you\??/i.test(raw);
     if ((isKoreanLocale || hasKoreanText) && hasLegacyPhrase) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
+        return "\ub85c\uceec\ub85c \ub354 \uc548\uc804\ud558\uac8c \ub300\ud654\ud558\uc138\uc694";
+    }
+    if (hasEnglishLegacy) {
+        return "Chat more safely in local mode";
     }
     if (isKoreanLocale && !hasKoreanText) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
+        return "Chat more safely in local mode";
     }
     return raw;
 }
@@ -938,9 +1060,15 @@ function __getDefaultChatGreeting() {
         if (normalized) return normalized;
     }
     if (localeHint.startsWith("ko")) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
+        return "\ub85c\uceec\ub85c \ub354 \uc548\uc804\ud558\uac8c \ub300\ud654\ud558\uc138\uc694";
     }
-    return "Hello! How can I help you? \ud83d\ude0a";
+    return "Chat more safely in local mode";
+}
+
+function __activateLocalModeFromGreeting() {
+    if (window.isLocalActive) return;
+    if (typeof window.handleLocalToggle !== "function") return;
+    Promise.resolve(window.handleLocalToggle()).catch(function () {});
 }
 
 function __chatBoxHasContent(chatBox) {
@@ -981,11 +1109,30 @@ function __ensureDefaultChatGreeting(force) {
     const wrapper = document.createElement('div');
     const body = document.createElement('div');
     const bubble = document.createElement('div');
+    const greetingText = __getDefaultChatGreeting();
 
     wrapper.className = 'chat-entry ai-entry __default-chat-greeting';
     body.className = 'chat-entry-body';
     bubble.className = 'chat-bubble-ai';
-    bubble.innerHTML = __getDefaultChatGreeting();
+    bubble.classList.add('chat-welcome-cta');
+    bubble.style.display = 'inline-flex';
+    bubble.style.alignItems = 'center';
+    bubble.style.gap = '6px';
+    bubble.innerHTML = '<span class="chat-welcome-cta-inner" style="display:inline-flex;align-items:center;gap:6px;"><i class="ri-ghost-4-line chat-welcome-cta-icon" aria-hidden="true" style="font-size:15px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;"></i><span class="chat-welcome-cta-text">' + greetingText + '</span></span>';
+    bubble.style.cursor = 'pointer';
+    bubble.setAttribute('role', 'button');
+    bubble.setAttribute('tabindex', '0');
+    bubble.setAttribute('title', '로컬모드 활성화');
+    bubble.addEventListener('click', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        __activateLocalModeFromGreeting();
+    });
+    bubble.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        __activateLocalModeFromGreeting();
+    });
 
     body.appendChild(bubble);
     wrapper.appendChild(body);

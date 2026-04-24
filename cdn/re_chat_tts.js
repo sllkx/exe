@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
     const ICON_SEED = encodeURIComponent(String(window.ISAI_CLIENT_IP || "IP"));
     const ASSISTANT_ICON = `https://api.dicebear.com/7.x/identicon/svg?seed=${ICON_SEED}&backgroundColor=transparent`;
     const USER_ICON = `https://api.dicebear.com/7.x/identicon/svg?seed=${ICON_SEED}&backgroundColor=transparent`;
@@ -11,24 +11,68 @@
 
     const DEFAULT_WELCOME_MESSAGES = {
         ko: "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a",
-        en: "Hello! How can I help you? 😊",
-        ja: "こんにちは。どのようにお手伝いできますか？ 😊",
-        zh: "你好！我可以帮你做什么？ 😊",
-        "zh-tw": "你好！我可以幫你做什麼？ 😊",
-        es: "Hola, ¿en qué puedo ayudarte? 😊",
-        fr: "Bonjour ! Comment puis-je vous aider ? 😊",
-        de: "Hallo! Wie kann ich Ihnen helfen? 😊",
-        pt: "Olá! Como posso ajudar? 😊",
-        ru: "Здравствуйте! Чем я могу помочь? 😊",
-        ar: "مرحبًا! كيف يمكنني مساعدتك؟ 😊",
-        hi: "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ? 😊",
-        id: "Halo! Ada yang bisa saya bantu? 😊",
-        vi: "Xin chào! Tôi có thể giúp gì cho bạn? 😊",
-        th: "สวัสดี! มีอะไรให้ฉันช่วยได้บ้าง? 😊",
-        tr: "Merhaba! Size nasıl yardımcı olabilirim? 😊",
-        it: "Ciao! Come posso aiutarti? 😊",
-        nl: "Hallo! Waarmee kan ik je helpen? 😊",
-        pl: "Czesc! W czym moge pomóc? 😊"
+        en: "Hello! How can I help you? ?삃",
+        ja: "?볝굯?ャ걾??귙겑??굠?녴겓?딀뎸鴉앫걚?㎯걤?얇걲?뗰폕 ?삃",
+        zh: "鵝졾?竊곫닊??빳躍?퐷?싦?阿덌폕 ?삃",
+        "zh-tw": "鵝졾?竊곫닊??빳亮ヤ퐷?싦?墉쇽폕 ?삃",
+        es: "Hola, 쩔en qu챕 puedo ayudarte? ?삃",
+        fr: "Bonjour ! Comment puis-je vous aider ? ?삃",
+        de: "Hallo! Wie kann ich Ihnen helfen? ?삃",
+        pt: "Ol찼! Como posso ajudar? ?삃",
+        ru: "?畇?逵勻??勻?橘?筠! 槻筠劇 ? 劇棘均? 極棘劇棘??? ?삃",
+        ar: "?邈幕磨?碼! ??? ?????? ?卍碼晩膜魔?? ?삃",
+        hi: "西ⓣㄾ西멘쪓西ㅰ쪍! 西?쪎西?西녱ㄺ西뺖? 西뺖쪎西멘쪍 西?ㄶ西?西뺖ㅀ 西멘쨻西ㅰㅎ 西밝쪈西? ?삃",
+        id: "Halo! Ada yang bisa saya bantu? ?삃",
+        vi: "Xin ch횪o! T척i c처 th沼?gi첬p g챙 cho b梳죒? ?삃",
+        th: "錫む름錫긍릉錫붲링! 錫□링錫?린仙꾝르仙꺺릊仙됢툒錫긍툢錫듺퉰錫㏅륭仙꾝툝仙됢툣仙됢림錫? ?삃",
+        tr: "Merhaba! Size nas캇l yard캇mc캇 olabilirim? ?삃",
+        it: "Ciao! Come posso aiutarti? ?삃",
+        nl: "Hallo! Waarmee kan ik je helpen? ?삃",
+        pl: "Czesc! W czym moge pom처c? ?삃"
+    };
+
+    Object.assign(DEFAULT_WELCOME_MESSAGES, {
+        ko: "?덈뀞?섏꽭?? 臾댁뾿???꾩??쒕┫源뚯슂? ?삃",
+        en: "Hello! How can I help you? ?삃",
+        ja: "?볝굯?ャ걾??귚퐬?믡걡?뗤폓?꾠걮?얇걮?뉎걝?뗰폕 ?삃",
+        zh: "鵝졾?竊뚧쐣餓阿덂룾餓ε리鵝좂쉪?쀯폕 ?삃",
+        "zh-tw": "鵝졾?竊뚧쐣餓墉쇔룾餓ε무鵝좂쉪?롳폕 ?삃",
+        es: "Hola, 쩔en qu챕 puedo ayudarte? ?삃",
+        fr: "Bonjour ! Comment puis-je vous aider ? ?삃",
+        de: "Hallo! Wie kann ich Ihnen helfen? ?삃",
+        pt: "Ol찼! Como posso ajudar? ?삃",
+        ru: "?畇?逵勻??勻?橘?筠! 槻筠劇 ? 劇棘均? 極棘劇棘??? ?삃",
+        ar: "?邈幕磨?碼! ??? ?????? ?卍碼晩膜魔?? ?삃",
+        hi: "西ⓣㄾ西멘쪓西ㅰ쪍誓?西?쪎西?西녱ㄺ西뺖? 西뺖ㅏ西?西ㅰㅀ西?西?ㄶ西?西뺖ㅀ 西멘쨻西ㅰㅎ 西밝쪈西? ?삃",
+        id: "Halo! Ada yang bisa saya bantu? ?삃",
+        vi: "Xin ch횪o! T척i c처 th沼?gi첬p g챙 cho b梳죒? ?삃",
+        th: "錫む름錫긍릉錫붲링! 錫□링錫?린仙꾝르仙꺺릊仙됢툒錫긍툢錫듺퉰錫㏅륭仙꾝릊錫? ?삃",
+        tr: "Merhaba! Size nas캇l yard캇mc캇 olabilirim? ?삃",
+        it: "Ciao! Come posso aiutarti? ?삃",
+        nl: "Hallo! Waarmee kan ik je helpen? ?삃",
+        pl: "Cze힄훶! W czym mog휌 pom처c? ?삃"
+    });
+
+    const LOCAL_WELCOME_CTA_MESSAGES = {
+        ko: "\ub85c\uceec\ub85c \ub354 \uc548\uc804\ud558\uac8c \ub300\ud654\ud558\uc138\uc694",
+        en: "Chat more safely in local mode",
+        ja: "\u30ed\u30fc\u30ab\u30eb\u30e2\u30fc\u30c9\u3067\u3088\u308a\u5b89\u5168\u306b\u4f1a\u8a71\u3057\u307e\u3057\u3087\u3046",
+        zh: "\u5728\u672c\u5730\u6a21\u5f0f\u4e0b\u66f4\u5b89\u5168\u5730\u804a\u5929",
+        "zh-tw": "\u5728\u672c\u5730\u6a21\u5f0f\u4e0b\u66f4\u5b89\u5168\u5730\u5c0d\u8a71",
+        es: "Habla de forma mas segura en modo local",
+        fr: "Discutez plus surement en mode local",
+        de: "Sicherer im lokalen Modus chatten",
+        pt: "Converse com mais seguranca no modo local",
+        ru: "\u041e\u0431\u0449\u0430\u0439\u0442\u0435\u0441\u044c \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u0435\u0435 \u0432 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e\u043c \u0440\u0435\u0436\u0438\u043c\u0435",
+        ar: "\u062a\u062d\u062f\u062b \u0628\u0634\u0643\u0644 \u0623\u0643\u062b\u0631 \u0623\u0645\u0627\u0646\u0627 \u0641\u064a \u0627\u0644\u0648\u0636\u0639 \u0627\u0644\u0645\u062d\u0644\u064a",
+        hi: "\u0932\u094b\u0915\u0932 \u092e\u094b\u0921 \u092e\u0947\u0902 \u0914\u0930 \u0905\u0927\u093f\u0915 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0924\u0930\u0940\u0915\u0947 \u0938\u0947 \u091a\u0948\u091f \u0915\u0930\u0947\u0902",
+        id: "Ngobrol lebih aman di mode lokal",
+        vi: "Tro chuyen an toan hon o che do cuc bo",
+        th: "\u0e41\u0e0a\u0e17\u0e44\u0e14\u0e49\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e1b\u0e25\u0e2d\u0e14\u0e20\u0e31\u0e22\u0e22\u0e34\u0e48\u0e07\u0e02\u0e36\u0e49\u0e19\u0e43\u0e19\u0e42\u0e2b\u0e21\u0e14\u0e42\u0e25\u0e04\u0e31\u0e25",
+        tr: "Yerel modda daha guvenli sohbet edin",
+        it: "Chatta in modo piu sicuro in locale",
+        nl: "Chat veiliger in lokale modus",
+        pl: "Rozmawiaj bezpieczniej w trybie lokalnym"
     };
 
     const MODE_META = {
@@ -39,6 +83,14 @@
             subtitle: "Chat, search, and generated results stay inside this card.",
             hint: "Type here to keep the conversation and outputs inside this card.",
             placeholder: ""
+        },
+        expert: {
+            badge: "Expert",
+            kicker: "Expert Mode",
+            title: "Compare multiple takes",
+            subtitle: "Several expert-style passes are merged into one final answer.",
+            hint: "Ask for a decision, plan, or comparison and this mode will synthesize it.",
+            placeholder: "Ask for a deeper synthesized answer..."
         },
         search: {
             badge: "Search",
@@ -253,7 +305,7 @@
 
         const modes = loadRecentModes()
             .filter((mode) => mode !== currentModeValue)
-            .slice(0, RECENT_MODE_LIMIT);
+            .slice(0, getRecentModeLimit());
 
         if (modes.length === 0) {
             container.innerHTML = "";
@@ -564,22 +616,104 @@
 
     function normalizeWelcomeMessage(message, localeHint) {
         const raw = String(message || "").trim();
-        if (!raw) return "";
-        const cleaned = raw.replace(/\?삃/g, "😊").replace(/\s+/g, " ").trim();
-        if ((String(localeHint || "").toLowerCase().startsWith("ko") || /[ㄱ-ㅎ가-힣]/.test(cleaned)) && /도와드릴까요|뭐 도와드릴까요/.test(cleaned)) {
-            return "안녕하세요. 무엇을 도와드릴까요? 😊";
+        const normalized = raw.replace(/\s+/g, " ").trim();
+        if (!normalized) return "";
+
+        const locale = String(localeHint || detectUiLanguage() || "").toLowerCase();
+        const fallbackMessage = LOCAL_WELCOME_CTA_MESSAGES[locale] || LOCAL_WELCOME_CTA_MESSAGES.en;
+
+        const knownDefaultGreetings = [
+            "안녕하세요. 무엇을 도와드릴까요? 😊",
+            "안녕하세요. 무엇을 도와드릴까요?",
+            "Hello! How can I help you?",
+            "Hello! How can I help you? 😊"
+        ].map((msg) => String(msg).replace(/\s+/g, " ").trim().toLowerCase());
+
+        if (knownDefaultGreetings.includes(normalized.toLowerCase())) {
+            return fallbackMessage;
         }
-        return cleaned;
+
+        return normalized;
     }
 
     function getLocalizedWelcomeMessage() {
         const uiLanguage = detectUiLanguage();
-        if (SERVER_I18N.welcomeMessage) {
-            const normalized = normalizeWelcomeMessage(SERVER_I18N.welcomeMessage, uiLanguage);
-            if (normalized) return normalized;
-        }
-        const fallbackMessage = DEFAULT_WELCOME_MESSAGES[uiLanguage] || DEFAULT_WELCOME_MESSAGES.en;
+        const fallbackMessage = LOCAL_WELCOME_CTA_MESSAGES[uiLanguage] || LOCAL_WELCOME_CTA_MESSAGES.en;
         return normalizeWelcomeMessage(fallbackMessage, uiLanguage);
+    }
+
+    function isLocalWelcomeCtaMessage(text) {
+        const raw = String(text || "").trim();
+        if (!raw) return false;
+        const normalized = raw.replace(/\s+/g, " ").trim().toLowerCase();
+        return Object.values(LOCAL_WELCOME_CTA_MESSAGES).some((msg) => (
+            normalized === String(msg || "").replace(/\s+/g, " ").trim().toLowerCase() ||
+            normalized.includes(String(msg || "").replace(/\s+/g, " ").trim().toLowerCase()) ||
+            String(msg || "").replace(/\s+/g, " ").trim().toLowerCase().includes(normalized)
+        ));
+    }
+
+    function activateLocalModeFromWelcomeBubble() {
+        if (typeof isLocalActive !== "undefined" && !!isLocalActive) {
+            if (typeof showToast === "function") showToast("?대? 濡쒖뺄 紐⑤뱶媛 ?쒖꽦?붾릺???덉뒿?덈떎.");
+            return;
+        }
+        if (typeof handleLocalToggle !== "function") return;
+        Promise.resolve(handleLocalToggle()).then(() => {
+            if (typeof showToast === "function") showToast("濡쒖뺄 紐⑤뱶瑜??쒖꽦?뷀뻽?듬땲??");
+        }).catch(() => {});
+    }
+
+    function bindWelcomeCtaBubble(bubble, messageText) {
+        if (!bubble || !isLocalWelcomeCtaMessage(messageText)) return;
+        const plainText = decodeHtmlEntities(String(messageText || "").trim()) || String(messageText || "").trim();
+        bubble.classList.add("chat-welcome-cta");
+        bubble.style.display = "inline-flex";
+        bubble.style.alignItems = "center";
+        bubble.style.gap = "6px";
+        const currentText = decodeHtmlEntities(String(bubble.textContent || "").trim()) || String(bubble.textContent || "").trim();
+        if (!bubble.querySelector(".chat-welcome-cta-icon") || currentText !== plainText) {
+            bubble.innerHTML = "";
+            const inner = document.createElement("span");
+            inner.className = "chat-welcome-cta-inner";
+            inner.style.display = "inline-flex";
+            inner.style.alignItems = "center";
+            inner.style.gap = "6px";
+
+            const icon = document.createElement("i");
+            icon.className = "ri-ghost-4-line chat-welcome-cta-icon";
+            icon.setAttribute("aria-hidden", "true");
+            icon.style.fontSize = "15px";
+            icon.style.lineHeight = "1";
+            icon.style.display = "inline-flex";
+            icon.style.alignItems = "center";
+            icon.style.justifyContent = "center";
+            icon.style.flex = "0 0 auto";
+
+            const text = document.createElement("span");
+            text.className = "chat-welcome-cta-text";
+            text.innerHTML = escapeHtml(plainText).replace(/\n/g, "<br>");
+
+            inner.appendChild(icon);
+            inner.appendChild(text);
+            bubble.appendChild(inner);
+        }
+        bubble.style.cursor = "pointer";
+        bubble.setAttribute("role", "button");
+        bubble.setAttribute("tabindex", "0");
+        bubble.setAttribute("title", "\ud074\ub9ad\ud574\uc11c \ub85c\uceec \ubaa8\ub4dc\ub97c \ud65c\uc131\ud654");
+        if (bubble.dataset.welcomeCtaBound === "1") return;
+        bubble.dataset.welcomeCtaBound = "1";
+        bubble.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            activateLocalModeFromWelcomeBubble();
+        });
+        bubble.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            activateLocalModeFromWelcomeBubble();
+        });
     }
 
     function hasActiveCharacterChatSession() {
@@ -641,9 +775,18 @@
         if (hint) hint.textContent = meta.hint;
         if (input && !hasActiveCharacterChatSession()) input.placeholder = "";
         if (submitButton) {
+            submitButton.hidden = false;
             submitButton.style.display = "inline-flex";
+            submitButton.style.visibility = "visible";
+            submitButton.style.opacity = "1";
+            submitButton.style.color = "#ffffff";
         }
-        if (icon) icon.className = "ri-arrow-up-s-line text-[14px]";
+        if (typeof window.updateMainSubmitButtonState === "function") {
+            window.updateMainSubmitButtonState();
+        } else if (icon) {
+            icon.className = "ri-arrow-up-s-line text-[13px] text-white";
+            icon.style.color = "#ffffff";
+        }
         updateHeaderAvatar(assistant);
     }
 
@@ -694,6 +837,13 @@
         return button.getAttribute("aria-label") || button.getAttribute("title") || mode;
     }
 
+    function getRenderableRecentModes(currentModeValue) {
+        return readRecentModes()
+            .filter((mode) => mode !== currentModeValue)
+            .filter((mode) => !!getModeButton(mode))
+            .slice(0, getRecentModeLimit());
+    }
+
     function syncRecentModePadding(count) {
         const field = document.getElementById("chat-input-field");
         if (!field) return;
@@ -704,10 +854,7 @@
         const container = document.getElementById("recent-mode-actions");
         if (!container) return;
 
-        const recentModes = readRecentModes()
-            .filter((mode) => mode !== currentModeValue)
-            .filter((mode) => !!getModeButton(mode))
-            .slice(0, RECENT_MODE_LIMIT);
+        const recentModes = getRenderableRecentModes(currentModeValue);
 
         container.innerHTML = "";
 
@@ -753,6 +900,18 @@
             .replace(/\s(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, ' $1="#"');
     }
 
+    function getAssistantEmptyFallback() {
+        const uiLanguage = detectUiLanguage();
+        const map = {
+            ko: "\uc751\ub2f5\uc744 \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.",
+            en: "I could not load a response.",
+            ja: "\u5fdc\u7b54\u3092\u8aad\u307f\u8fbc\u3081\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+            zh: "\u65e0\u6cd5\u52a0\u8f7d\u56de\u590d\u3002",
+            es: "No pude cargar una respuesta."
+        };
+        return map[uiLanguage] || map.en;
+    }
+
     function normalizeMessageHtml(role, content) {
         const text = String(content ?? "");
         if (role === "user") return escapeHtml(text).replace(/\n/g, "<br>");
@@ -761,9 +920,16 @@
         const sanitizedDecoded = sanitizeAssistantHtml(decoded);
         const sanitizedRaw = sanitizeAssistantHtml(text);
         const htmlCandidate = /<\/?[a-z][^>]*>/i.test(sanitizedDecoded) ? sanitizedDecoded : sanitizedRaw;
-        return htmlCandidate
+        const rendered = htmlCandidate
             .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
             .replace(/\n/g, "<br>");
+        const plainText = decodeHtmlEntities(rendered)
+            .replace(/<[^>]*>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        if (plainText) return rendered;
+        const fallbackText = decodeHtmlEntities(text).replace(/\s+/g, " ").trim() || getAssistantEmptyFallback();
+        return escapeHtml(fallbackText).replace(/\n/g, "<br>");
     }
 
     function ensureChatSpacer(chatBox) {
@@ -821,6 +987,9 @@
                 bubble.innerHTML = isError
                     ? (imageError ? imageErrorIconHtml(content) : genericErrorIconHtml(content))
                     : normalizeMessageHtml(role, content);
+                if (!isError && isLocalWelcomeCtaMessage(content)) {
+                    bindWelcomeCtaBubble(bubble, content);
+                }
 
                 body.appendChild(bubble);
                 wrapper.appendChild(body);
@@ -836,6 +1005,7 @@
 
     function ensureWelcomeMessage(force = false) {
         if (hasActiveCharacterChatSession()) return;
+        if (window.ISAI_ENABLE_DEFAULT_WELCOME !== true) return;
         const chatBox = document.getElementById("chat-box");
         if (!chatBox) return;
         if (force) chatBox.innerHTML = "";
@@ -843,7 +1013,8 @@
         if (chatBox.querySelector(".chat-entry")) return;
         const welcomeMessage = getLocalizedWelcomeMessage();
         if (typeof appendMsg === "function") {
-            appendMsg("ai", welcomeMessage);
+            const bubble = appendMsg("ai", welcomeMessage);
+            bindWelcomeCtaBubble(bubble, welcomeMessage);
             return;
         }
 
@@ -855,6 +1026,7 @@
         body.className = "chat-entry-body";
         bubble.className = "chat-bubble-ai";
         bubble.innerHTML = normalizeMessageHtml("ai", welcomeMessage);
+        bindWelcomeCtaBubble(bubble, welcomeMessage);
         body.appendChild(bubble);
         wrapper.appendChild(body);
         chatBox.appendChild(wrapper);
@@ -1654,6 +1826,10 @@
         updateComposerMeta(getCurrentMode());
         updateTtsUi();
         renderRecentModeActions(getCurrentMode());
+        if (!window.__isaiRecentModeResizeBound) {
+            window.addEventListener("resize", () => renderRecentModeActions(getCurrentMode()));
+            window.__isaiRecentModeResizeBound = true;
+        }
         loadSideBanner();
 
         const ttsControls = document.getElementById("tts-controls");
@@ -1693,3 +1869,7 @@
         initChatTtsUi();
     }
 })();
+
+    function getRecentModeLimit() {
+        return 1;
+    }

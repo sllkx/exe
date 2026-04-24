@@ -302,7 +302,19 @@ async function performVoiceConversationRequest(text) {
             sysPrompt = String(activeApp.system_prompt || '').trim();
         }
 
-        const history = Array.isArray(chatHistory) ? chatHistory.slice(-6) : [];
+        const history = Array.isArray(chatHistory)
+            ? chatHistory
+                .filter((msg) => {
+                    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) return false;
+                    const content = String(msg.content || '').trim();
+                    if (!content) return false;
+                    if (msg.role === 'assistant' && typeof isIgnorableAssistantGreeting === 'function' && isIgnorableAssistantGreeting(content)) {
+                        return false;
+                    }
+                    return true;
+                })
+                .slice(-6)
+            : [];
         const response = await fetch('?action=ai_chat', {
             method: 'POST',
             body: JSON.stringify({
@@ -330,6 +342,15 @@ async function performVoiceConversationRequest(text) {
                 { role: 'user', content: userText },
                 { role: 'assistant', content: historyResult }
             );
+            if (typeof isIgnorableAssistantGreeting === 'function') {
+                chatHistory = chatHistory.filter((msg) => {
+                    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) return false;
+                    const content = String(msg.content || '').trim();
+                    if (!content) return false;
+                    if (msg.role === 'assistant' && isIgnorableAssistantGreeting(content)) return false;
+                    return true;
+                });
+            }
         }
 
         if (typeof scrollBottom === 'function') scrollBottom();

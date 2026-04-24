@@ -16,6 +16,7 @@ const T_DATA = {
     en: {
         welcome: "How can I help you?",
         ph_chat: "Ask AI anything...",
+        ph_expert: "Ask for a synthesized expert answer...",
         ph_search: "Search topic...",
         ph_image: "Describe image...",
         ph_video: "Describe the video scene...",
@@ -40,6 +41,7 @@ const T_DATA = {
     ko: {
         welcome: "\uC548\uB155\uD558\uC138\uC694. \uBB34\uC5C7\uC744 \uB3C4\uC640\uB4DC\uB9B4\uAE4C\uC694?",
         ph_chat: "AI\uC5D0\uAC8C \uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694...",
+        ph_expert: "\uC5EC\uB7EC \uAD00\uC810\uC744 \uD569\uCCD0 \uB2F5\uD558\uB3C4\uB85D \uC694\uCCAD\uD574\uBCF4\uC138\uC694...",
         ph_search: "\uAC80\uC0C9\uD560 \uC8FC\uC81C\uB97C \uC785\uB825\uD558\uC138\uC694...",
         ph_image: "\uC774\uBBF8\uC9C0\uB97C \uC124\uBA85\uD574 \uC8FC\uC138\uC694...",
         ph_video: "\uC601\uC0C1 \uC7A5\uBA74\uC744 \uC124\uBA85\uD574 \uC8FC\uC138\uC694...",
@@ -64,6 +66,7 @@ const T_DATA = {
     ja: {
         welcome: "\u3053\u3093\u306B\u3061\u306F\u3002\u4F55\u3092\u304A\u624B\u4F1D\u3044\u3057\u307E\u3057\u3087\u3046\u304B\uFF1F",
         ph_chat: "AI\u306B\u4F55\u3067\u3082\u805E\u3044\u3066\u304F\u3060\u3055\u3044...",
+        ph_expert: "\u8907\u6570\u306E\u89B3\u70B9\u3092\u307E\u3068\u3081\u305F\u56DE\u7B54\u3092\u4F9D\u983C\u3057\u3066\u304F\u3060\u3055\u3044...",
         ph_search: "\u691C\u7D22\u3059\u308B\u30C8\u30D4\u30C3\u30AF\u3092\u5165\u529B...",
         ph_image: "\u753B\u50CF\u3092\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044...",
         ph_video: "\u52D5\u753B\u30B7\u30FC\u30F3\u3092\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044...",
@@ -88,6 +91,7 @@ const T_DATA = {
     zh: {
         welcome: "\u4F60\u597D\uFF0C\u6211\u53EF\u4EE5\u5E2E\u4F60\u505A\u4EC0\u4E48\uFF1F",
         ph_chat: "\u5411 AI \u63D0\u95EE\u4EFB\u4F55\u95EE\u9898...",
+        ph_expert: "\u8BF7\u8981\u6C42\u4E00\u4E2A\u878D\u5408\u591A\u79CD\u89C2\u70B9\u7684\u4E13\u5BB6\u7B54\u6848...",
         ph_search: "\u8F93\u5165\u641C\u7D22\u4E3B\u9898...",
         ph_image: "\u63CF\u8FF0\u56FE\u7247...",
         ph_video: "\u63CF\u8FF0\u89C6\u9891\u573A\u666F...",
@@ -112,6 +116,7 @@ const T_DATA = {
     es: {
         welcome: "Hola, como puedo ayudarte?",
         ph_chat: "Pregunta lo que quieras...",
+        ph_expert: "Pide una respuesta sintetizada desde varias perspectivas...",
         ph_search: "Buscar tema...",
         ph_image: "Describe la imagen...",
         ph_video: "Describe la escena del video...",
@@ -136,6 +141,7 @@ const T_DATA = {
     pt: {
         welcome: "Ola, como posso ajudar?",
         ph_chat: "Pergunte qualquer coisa para a IA...",
+        ph_expert: "Peça uma resposta sintetizada com varias perspectivas...",
         ph_search: "Pesquisar topico...",
         ph_image: "Descreva a imagem...",
         ph_video: "Descreva a cena do video...",
@@ -160,6 +166,7 @@ const T_DATA = {
     hi: {
         welcome: "\u0928\u092E\u0938\u094D\u0924\u0947, \u092E\u0948\u0902 \u0906\u092A\u0915\u0940 \u0915\u0948\u0938\u0947 \u092E\u0926\u0926 \u0915\u0930 \u0938\u0915\u0924\u093E \u0939\u0942\u0901?",
         ph_chat: "AI \u0938\u0947 \u0915\u0941\u091B \u092D\u0940 \u092A\u0942\u091B\u0947\u0902...",
+        ph_expert: "\u0905\u0928\u0947\u0915 \u0926\u0943\u0937\u094D\u091F\u093F\u0915\u094B\u0923\u094B\u0902 \u0915\u094B \u091C\u094B\u0921\u093C\u0915\u0930 \u091C\u0935\u093E\u092C \u092E\u093E\u0902\u0917\u0947\u0902...",
         ph_search: "\u0916\u094B\u091C \u0935\u093F\u0937\u092F \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902...",
         ph_image: "\u091B\u0935\u093F \u0915\u093E \u0935\u0930\u094D\u0923\u0928 \u0915\u0930\u0947\u0902...",
         ph_video: "\u0935\u0940\u0921\u093F\u092F\u094B \u0926\u0943\u0936\u094D\u092F \u0915\u093E \u0935\u0930\u094D\u0923\u0928 \u0915\u0930\u0947\u0902...",

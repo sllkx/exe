@@ -340,6 +340,7 @@ function __applyMobileChatRailSafety() {
     }
     if (document.body) {
         document.body.classList.toggle('mode-code', codeModeActive && mobileLike);
+        document.body.classList.toggle('mobile-code-stacked', codeModeActive && mobileLike);
         document.body.classList.remove('desktop-code-stage');
         document.body.classList.toggle('desktop-code-open', desktopCodeMode);
         document.body.classList.toggle('desktop-code-panel-mounted', desktopCodeMode && !fullscreenActive);
@@ -474,8 +475,8 @@ function __applyMobileChatRailSafety() {
             chatInputActions.style.setProperty('width', 'auto', 'important');
             chatInputActions.style.setProperty('top', 'auto', 'important');
             chatInputActions.style.setProperty('left', 'auto', 'important');
-            chatInputActions.style.setProperty('right', '16px', 'important');
-            chatInputActions.style.setProperty('bottom', '12px', 'important');
+            chatInputActions.style.setProperty('right', '12px', 'important');
+            chatInputActions.style.setProperty('bottom', '8px', 'important');
             chatInputActions.style.setProperty('justify-content', 'flex-end', 'important');
             chatInputActions.style.zIndex = '280';
         }
@@ -600,19 +601,22 @@ function __applyMobileChatRailSafety() {
         if (h < 180) {
             mainLayout.style.flex = '0 0 auto';
             mainLayout.style.height = 'auto';
-            mainLayout.style.minHeight = '250px';
+            mainLayout.style.minHeight = '320px';
             mainLayout.style.display = 'flex';
         }
         if (leftPanel) {
             leftPanel.style.display = 'flex';
             leftPanel.style.height = 'auto';
-            leftPanel.style.minHeight = '250px';
+            leftPanel.style.minHeight = '320px';
         }
         if (island) {
+            const mobileRows = codePanelVisible
+                ? (immersiveTopMode ? 'minmax(0, 1fr) minmax(240px, auto) 270px' : '320px minmax(240px, auto) 270px')
+                : (immersiveTopMode ? 'minmax(0, 1fr) auto 270px' : '320px auto 270px');
             island.style.position = 'relative';
             island.style.display = 'grid';
             island.style.gridTemplateColumns = `minmax(0, 1fr) ${toolbarWidth}px`;
-            island.style.gridTemplateRows = immersiveTopMode ? 'minmax(0, 1fr) auto 250px' : '250px auto 250px';
+            island.style.gridTemplateRows = mobileRows;
             island.style.alignItems = 'stretch';
             island.style.justifyItems = 'stretch';
         }
@@ -622,9 +626,9 @@ function __applyMobileChatRailSafety() {
             chatStack.style.flex = '1 1 auto';
             chatStack.style.width = '100%';
             chatStack.style.maxWidth = '100%';
-            chatStack.style.minHeight = immersiveTopMode ? '0' : '250px';
-            chatStack.style.height = immersiveTopMode ? '100%' : '250px';
-            chatStack.style.maxHeight = immersiveTopMode ? '100%' : '250px';
+            chatStack.style.minHeight = immersiveTopMode ? '0' : '320px';
+            chatStack.style.height = immersiveTopMode ? '100%' : '320px';
+            chatStack.style.maxHeight = immersiveTopMode ? '100%' : '320px';
             chatStack.style.paddingRight = '0';
             chatStack.style.boxSizing = 'border-box';
         }
@@ -637,9 +641,9 @@ function __applyMobileChatRailSafety() {
             toolbarArea.style.width = `${toolbarWidth}px`;
             toolbarArea.style.minWidth = `${toolbarWidth}px`;
             toolbarArea.style.maxWidth = `${toolbarWidth}px`;
-            toolbarArea.style.height = '250px';
-            toolbarArea.style.minHeight = '250px';
-            toolbarArea.style.maxHeight = '250px';
+            toolbarArea.style.height = '320px';
+            toolbarArea.style.minHeight = '320px';
+            toolbarArea.style.maxHeight = '320px';
             toolbarArea.style.setProperty('position', 'relative', 'important');
             toolbarArea.style.setProperty('right', 'auto', 'important');
             toolbarArea.style.setProperty('top', 'auto', 'important');
@@ -661,8 +665,8 @@ function __applyMobileChatRailSafety() {
             chatInputActions.style.setProperty('width', 'auto', 'important');
             chatInputActions.style.setProperty('top', 'auto', 'important');
             chatInputActions.style.setProperty('left', 'auto', 'important');
-            chatInputActions.style.setProperty('right', '14px', 'important');
-            chatInputActions.style.setProperty('bottom', '10px', 'important');
+            chatInputActions.style.setProperty('right', '12px', 'important');
+            chatInputActions.style.setProperty('bottom', '8px', 'important');
             chatInputActions.style.setProperty('justify-content', 'flex-end', 'important');
             chatInputActions.style.zIndex = ultraNarrow ? '280' : '40';
         }
@@ -674,9 +678,9 @@ function __applyMobileChatRailSafety() {
             boardRail.style.width = `${toolbarWidth}px`;
             boardRail.style.minWidth = `${toolbarWidth}px`;
             boardRail.style.maxWidth = `${toolbarWidth}px`;
-            boardRail.style.height = '250px';
-            boardRail.style.minHeight = '250px';
-            boardRail.style.maxHeight = '250px';
+            boardRail.style.height = '270px';
+            boardRail.style.minHeight = '270px';
+            boardRail.style.maxHeight = '270px';
             boardRail.style.alignSelf = 'stretch';
             boardRail.style.justifySelf = 'stretch';
         }
@@ -691,7 +695,7 @@ function __applyMobileChatRailSafety() {
             rightPanel.style.left = 'auto';
             rightPanel.style.right = 'auto';
             rightPanel.style.bottom = 'auto';
-            rightPanel.style.zIndex = '20';
+            rightPanel.style.zIndex = codePanelVisible ? '8' : '20';
             rightPanel.style.display = codePanelVisible ? 'flex' : 'none';
             rightPanel.style.opacity = codePanelVisible ? '1' : '0';
             rightPanel.style.minHeight = codePanelVisible ? '240px' : '0';
@@ -701,6 +705,7 @@ function __applyMobileChatRailSafety() {
             adWrap.style.display = 'flex';
             adWrap.style.gridColumn = '1';
             adWrap.style.gridRow = '3';
+            adWrap.style.zIndex = '16';
             adWrap.style.background = '#ffffff';
             adWrap.style.width = 'auto';
             adWrap.style.minWidth = '0';
@@ -717,6 +722,7 @@ function __applyMobileChatRailSafety() {
             adBody.style.display = 'flex';
             adBody.style.alignItems = 'center';
             adBody.style.justifyContent = 'center';
+            adBody.style.zIndex = '16';
             adBody.style.padding = '8px 6px';
             adBody.style.overflow = 'hidden';
             adBody.style.background = '#ffffff';
@@ -786,9 +792,9 @@ function __applyMobileChatRailSafety() {
                 toolbarArea.style.setProperty('top', 'auto', 'important');
                 toolbarArea.style.setProperty('left', 'auto', 'important');
                 toolbarArea.style.setProperty('bottom', 'auto', 'important');
-                toolbarArea.style.height = '250px';
-                toolbarArea.style.minHeight = '250px';
-                toolbarArea.style.maxHeight = '250px';
+                toolbarArea.style.height = '320px';
+                toolbarArea.style.minHeight = '320px';
+                toolbarArea.style.maxHeight = '320px';
                 toolbarArea.style.zIndex = '220';
             }
         }
@@ -799,8 +805,8 @@ function __applyMobileChatRailSafety() {
             chatInputActions.style.setProperty('width', 'auto', 'important');
             chatInputActions.style.setProperty('top', 'auto', 'important');
             chatInputActions.style.setProperty('left', 'auto', 'important');
-            chatInputActions.style.setProperty('right', '16px', 'important');
-            chatInputActions.style.setProperty('bottom', '12px', 'important');
+            chatInputActions.style.setProperty('right', '12px', 'important');
+            chatInputActions.style.setProperty('bottom', '8px', 'important');
             chatInputActions.style.setProperty('justify-content', 'flex-end', 'important');
             chatInputActions.style.zIndex = '12';
         }

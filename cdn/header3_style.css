@@ -3509,4 +3509,55 @@ select option {
             }
         }
 
+        /* Keep chat action rail anchored to one fixed bottom-right spot across UI modes */
+        :root {
+            --isai-chat-actions-right: 12px;
+            --isai-chat-actions-bottom: 8px;
+        }
+        #chat-main-stack #chat-input-actions,
+        #chat-main-stack:not(.settings-mode):not(.menu-mode) #chat-input-actions,
+        body.mode-code #chat-main-stack #chat-input-actions,
+        body.desktop-code-open #chat-main-stack #chat-input-actions {
+            right: var(--isai-chat-actions-right) !important;
+            bottom: var(--isai-chat-actions-bottom) !important;
+            left: auto !important;
+            top: auto !important;
+            transform: none !important;
+            margin: 0 !important;
+        }
+        .island-box:fullscreen #chat-main-stack #chat-input-actions,
+        .island-box:-webkit-full-screen #chat-main-stack #chat-input-actions {
+            right: var(--isai-chat-actions-right) !important;
+            bottom: calc(var(--isai-chat-actions-bottom) + env(safe-area-inset-bottom)) !important;
+            left: auto !important;
+            top: auto !important;
+            transform: none !important;
+            margin: 0 !important;
+        }
+
+        /* Keep active-app badge above input so it doesn't block typing */
+        :root {
+            --isai-active-app-status-bottom: 74px;
+        }
+        #chat-main-stack:not(.settings-mode):not(.menu-mode) #active-app-status {
+            position: absolute !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: var(--isai-active-app-status-bottom) !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding-top: 0 !important;
+            z-index: 24 !important;
+            pointer-events: none !important;
+        }
+        #chat-main-stack:not(.settings-mode):not(.menu-mode) #active-app-status > div {
+            pointer-events: auto !important;
+            transform: translateY(-2px);
+        }
+        @media (max-width: 900px) {
+            :root {
+                --isai-active-app-status-bottom: 72px;
+            }
+        }
+
 

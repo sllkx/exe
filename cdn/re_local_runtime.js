@@ -846,7 +846,7 @@
                 const targetSeqLen = Math.min(
                     Math.max(
                         speedConfig && speedConfig.maxSeqLen ? Number(speedConfig.maxSeqLen) : 256,
-                        128
+                        384
                     ),
                     2048
                 );
@@ -881,6 +881,14 @@
                         } catch (error) {
                             if (purgeModelCache && isRecoverableGgufLoadError(error)) {
                                 try { await purgeModelCache(candidateUrl); } catch (cacheError) {}
+                                try {
+                                    // Retry once after cache purge to recover from stale/corrupted GGUF cache.
+                                    await engine.loadModel(candidateUrl, overrideLoadOptions || baseLoadOptions);
+                                    profile.fallbackUrl = candidateUrl;
+                                    return;
+                                } catch (retryError) {
+                                    error = retryError;
+                                }
                             }
                             lastError = error;
                         }
@@ -934,6 +942,18 @@
         const profile = applyLocalModelProfileToConfig();
         const speedConfig = getSpeedPresetForTier(profile && profile.key) || {};
         const isLightTier = !!(profile && profile.key === "light");
+        const currentUiMode = String(
+            window.currentMode
+            || window.selectedMode
+            || (document.body && document.body.getAttribute("data-ui-mode"))
+            || "chat"
+        ).toLowerCase();
+        const isCharacterChat = !!(
+            window.ISAI_CHARACTER_CHAT_SESSION
+            && window.ISAI_CHARACTER_CHAT_SESSION.active
+        );
+        const isCodeMode = currentUiMode === "code";
+        const isLightTierEffective = isLightTier && !isCodeMode && !isCharacterChat;
         const outputLocale = String(
             (document && document.documentElement && document.documentElement.lang)
             || (navigator && navigator.language)
@@ -990,7 +1010,7 @@
                 try {
                     await compatEngine.loadModel(candidateUrl, {
                         speedPreset: speedConfig.enginePreset || "balanced",
-                        maxSeqLen: Math.max(speedConfig.maxSeqLen || 256, isLightTier ? 128 : 640)
+                        maxSeqLen: Math.max(speedConfig.maxSeqLen || 256, isCharacterChat ? 768 : (isLightTierEffective ? 384 : 640))
                     });
                     profile.fallbackUrl = candidateUrl;
                     lastError = null;
@@ -1018,9 +1038,9 @@
             let emittedWebllmToken = false;
             const stream = await localEngine.chat.completions.create({
                 messages,
-                temperature: isLightTier ? 0.18 : 0.45,
-                top_p: isLightTier ? 0.78 : 0.82,
-                max_tokens: isLightTier ? 48 : 220,
+                temperature: isLightTierEffective ? 0.18 : 0.45,
+                top_p: isLightTierEffective ? 0.78 : 0.82,
+                max_tokens: isCharacterChat ? 220 : (isLightTierEffective ? 48 : 220),
                 stream: true
             });
             for await (const chunk of stream) {
@@ -1209,6 +1229,105 @@
                 .replace(/\r\n/g, "\n");
         }
 
+        const localChunkDecoder = typeof TextDecoder !== "undefined"
+            ? new TextDecoder("utf-8")
+            : null;
+
+        function hasRenderableLocalText(value) {
+            const raw = String(value || "");
+            if (!raw) return false;
+            let extracted = "";
+            if (typeof extractPlainTextLocal === "function") {
+                try {
+                    extracted = String(extractPlainTextLocal(raw) || "").trim();
+                } catch (error) {
+                    extracted = "";
+                }
+            }
+            if (extracted) return true;
+            const fallback = raw
+                .replace(/<think>[\s\S]*?(<\/think>|$)/gi, " ")
+                .replace(/```json/gi, "")
+                .replace(/```/g, "")
+                .replace(/<br\s*\/?>/gi, "\n")
+                .replace(/<[^>]+>/g, " ")
+                .replace(/&nbsp;/gi, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+            return fallback.length > 0;
+        }
+
+        function readLocalChunkText(chunk) {
+            if (chunk == null) return "";
+            if (typeof chunk === "string") return chunk;
+            if (typeof chunk === "number") return String(chunk);
+            if (typeof Uint8Array !== "undefined" && chunk instanceof Uint8Array && localChunkDecoder) {
+                return localChunkDecoder.decode(chunk, { stream: true });
+            }
+            if (Array.isArray(chunk)) {
+                for (const item of chunk) {
+                    if (item == null) continue;
+                    if (typeof item === "string" || typeof item === "number") {
+                        return String(item);
+                    }
+                    if (typeof Uint8Array !== "undefined" && item instanceof Uint8Array && localChunkDecoder) {
+                        return localChunkDecoder.decode(item, { stream: true });
+                    }
+                    if (typeof item === "object" && item) {
+                        const nested = item.currentText || item.text || item.content || (item.delta && item.delta.content) || "";
+                        if (nested != null && String(nested).trim() !== "") {
+                            return String(nested);
+                        }
+                    }
+                }
+            }
+
+            const directCandidates = [
+                chunk.currentText,
+                chunk.text,
+                chunk.content,
+                chunk.delta,
+                chunk.token,
+                chunk.tokenText,
+                chunk.tokenBytes,
+                chunk.bytes
+            ];
+            for (const candidate of directCandidates) {
+                if (candidate == null) continue;
+                if (typeof candidate === "string" || typeof candidate === "number") {
+                    return String(candidate);
+                }
+                if (typeof Uint8Array !== "undefined" && candidate instanceof Uint8Array && localChunkDecoder) {
+                    return localChunkDecoder.decode(candidate, { stream: true });
+                }
+                if (typeof candidate === "object" && candidate && typeof candidate.content === "string") {
+                    return candidate.content;
+                }
+            }
+
+            const firstChoice = Array.isArray(chunk.choices) ? chunk.choices[0] : null;
+            if (firstChoice && typeof firstChoice === "object") {
+                const nestedCandidates = [
+                    firstChoice.text,
+                    firstChoice.content,
+                    chunk.delta && chunk.delta.content,
+                    firstChoice.delta && firstChoice.delta.content,
+                    firstChoice.message && firstChoice.message.content
+                ];
+                for (const candidate of nestedCandidates) {
+                    if (candidate == null) continue;
+                    if (typeof candidate === "string" || typeof candidate === "number") {
+                        return String(candidate);
+                    }
+                    if (typeof Uint8Array !== "undefined" && candidate instanceof Uint8Array && localChunkDecoder) {
+                        return localChunkDecoder.decode(candidate, { stream: true });
+                    }
+                }
+            }
+
+            return "";
+        }
+
         function cleanupAssistantBoilerplate(text) {
             let value = String(text || "");
             value = value
@@ -1226,9 +1345,8 @@
                     .filter(Boolean);
                 const cleaned = lines.filter((line) => {
                     const hasHangul = /[가-힣]/.test(line);
-                    const asciiOnly = /^[\x00-\x7F\s.,!?'"():;\-]+$/.test(line);
                     const helperLike = /hello|how are you|i'?m here to help|don'?t hesitate|translate|write stories|chat about/i.test(line);
-                    if (!hasHangul && (asciiOnly || helperLike)) return false;
+                    if (!hasHangul && helperLike) return false;
                     return true;
                 });
                 value = cleaned.join("\n").trim();
@@ -1262,9 +1380,8 @@
 
             const cleaned = lines.filter((line) => {
                 const hasHangul = /[\uAC00-\uD7A3]/.test(line);
-                const asciiOnly = /^[\x00-\x7F\s.,!?'"():;\-_/+]+$/.test(line);
                 const helperLike = /hello|how are you|i'?m here to help|don'?t hesitate|translate|write stories|chat about/i.test(line);
-                if (!hasHangul && (asciiOnly || helperLike)) return false;
+                if (!hasHangul && helperLike) return false;
                 return true;
             });
 
@@ -1290,9 +1407,8 @@
 
             const cleaned = lines.filter((line) => {
                 const hasHangul = /[\uAC00-\uD7A3]/.test(line);
-                const asciiOnly = /^[\x00-\x7F\s.,!?'"():;\-_/+]+$/.test(line);
                 const helperLike = /hello|how are you|i(?:'|\u2019)m here to help|don(?:'|\u2019)t hesitate|translate|write stories|chat about/i.test(line);
-                if (!hasHangul && (asciiOnly || helperLike)) return false;
+                if (!hasHangul && helperLike) return false;
                 return true;
             });
 
@@ -1545,6 +1661,7 @@
 
         async function consumeLocalStream(stream) {
             let renderedText = "";
+            let aggregatedText = "";
             let repetitionHits = 0;
 
             for await (const chunk of stream) {
@@ -1555,13 +1672,15 @@
                     break;
                 }
 
-                const rawCurrentText = sanitizeStreamText(
-                    (chunk && (chunk.currentText || chunk.text || chunk.content)) || ""
-                );
+                const rawCurrentText = sanitizeStreamText(readLocalChunkText(chunk));
                 if (!rawCurrentText) continue;
-                const cleanedText = cleanupAssistantBoilerplateAscii(rawCurrentText);
+                aggregatedText = aggregatedText
+                    ? (aggregatedText + trimIncomingOverlap(aggregatedText, rawCurrentText))
+                    : rawCurrentText;
+
+                const cleanedText = cleanupAssistantBoilerplateAscii(aggregatedText);
                 const currentText = trimRepeatedSentenceHistory(
-                    trimRestartedSentenceBlock(trimRestartedPrefixBlock(cleanedText || rawCurrentText))
+                    trimRestartedSentenceBlock(trimRestartedPrefixBlock(cleanedText || aggregatedText))
                 );
                 let nextText = trimRepeatedSentenceHistory(
                     trimRestartedSentenceBlock(trimDuplicateParagraphs(trimRepeatedTail(currentText)))
@@ -1621,6 +1740,19 @@
                 callback(renderedText, { replace: true, isStreaming: true });
             }
 
+            if (!hasRenderableLocalText(renderedText || "") && hasRenderableLocalText(aggregatedText || "")) {
+                const fallbackText = trimRepeatedSentenceHistory(
+                    trimRestartedSentenceBlock(
+                        trimDuplicateParagraphs(
+                            trimRestartedPrefixBlock(cleanupAssistantBoilerplateAscii(aggregatedText))
+                        )
+                    )
+                );
+                if (hasRenderableLocalText(fallbackText || "")) {
+                    renderedText = fallbackText;
+                }
+            }
+
             return renderedText;
         }
 
@@ -1629,15 +1761,39 @@
             return consumeLocalStream(stream);
         }
 
+        async function generateWithRawOptions(generationOptions) {
+            const stream = await localEngine.generateChat(messages, generationOptions);
+            let rawRendered = "";
+            for await (const chunk of stream) {
+                if (stopSignal) {
+                    if (typeof localEngine.interruptGenerate === "function") {
+                        try {
+                            localEngine.interruptGenerate();
+                        } catch (error) {}
+                    }
+                    break;
+                }
+                const rawPiece = sanitizeStreamText(readLocalChunkText(chunk));
+                if (!rawPiece) continue;
+                rawRendered = rawRendered
+                    ? (rawRendered + trimIncomingOverlap(rawRendered, rawPiece))
+                    : rawPiece;
+                if (hasRenderableLocalText(rawRendered)) {
+                    callback(rawRendered, { replace: true, isStreaming: true });
+                }
+            }
+            return String(rawRendered || "").trim();
+        }
+
         let renderedText = await generateWithOptions({
-            ...(isLightTier ? { nPredict: 32 } : {}),
-            useCache: !isLightTier,
-            sampling: speedConfig.sampling || (isLightTier
+            ...(isLightTierEffective ? { nPredict: 64 } : {}),
+            useCache: !isLightTierEffective,
+            sampling: speedConfig.sampling || (isLightTierEffective
                 ? { temp: 0.18, top_k: 12, top_p: 0.78, penalty_repeat: 1.22 }
                 : { temp: 0.45, top_k: 32, top_p: 0.88, penalty_repeat: 1.14 })
         });
 
-        if (!extractPlainTextLocal(renderedText || "")) {
+        if (!hasRenderableLocalText(renderedText || "")) {
             if (typeof localEngine.clearChatState === "function") {
                 try {
                     await localEngine.clearChatState();
@@ -1654,7 +1810,20 @@
             });
         }
 
-        if (!extractPlainTextLocal(renderedText || "")) {
+        if (!hasRenderableLocalText(renderedText || "")) {
+            renderedText = await generateWithRawOptions({
+                useCache: false,
+                nPredict: isLightTierEffective ? 96 : 220,
+                sampling: {
+                    temp: 0.22,
+                    top_k: 28,
+                    top_p: 0.9,
+                    penalty_repeat: 1.1
+                }
+            });
+        }
+
+        if (!hasRenderableLocalText(renderedText || "")) {
             callback(emptyResponseText, { replace: true, isStreaming: false });
         }
     };

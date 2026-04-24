@@ -3058,9 +3058,17 @@ function mapPromptMessagesForLocalEngine(promptArr) {
 
     const activeProfile = typeof getActiveLocalModelProfile === "function" ? getActiveLocalModelProfile() : null;
     const isLightTier = !!(activeProfile && activeProfile.key === "light");
+    const currentUiMode = String(
+        window.currentMode
+        || window.selectedMode
+        || (document.body && document.body.getAttribute("data-ui-mode"))
+        || "chat"
+    ).toLowerCase();
+    const isCodeMode = currentUiMode === "code";
+    const isLightTierEffective = isLightTier && !isCodeMode;
     const systemMessages = messages.filter((message) => message.role === "system").slice(-1);
     const dialogMessages = messages.filter((message) => message.role !== "system");
-    const historyLimit = isLightTier ? 1 : 2;
+    const historyLimit = isLightTierEffective ? 1 : 2;
     const compactMessages = dialogMessages.slice(-historyLimit);
     return [...systemMessages, ...compactMessages];
 }
@@ -3349,6 +3357,14 @@ async function runLocalInference(promptArr, callback) {
     const webllmConfig = modelConfig.webllm || {};
     const activeProfile = typeof getActiveLocalModelProfile === "function" ? getActiveLocalModelProfile() : null;
     const isLightTier = !!(activeProfile && activeProfile.key === "light");
+    const currentUiMode = String(
+        window.currentMode
+        || window.selectedMode
+        || (document.body && document.body.getAttribute("data-ui-mode"))
+        || "chat"
+    ).toLowerCase();
+    const isCodeMode = currentUiMode === "code";
+    const isLightTierEffective = isLightTier && !isCodeMode;
     let renderedText = "";
     let previousDelta = "";
     let repetitionHits = 0;
@@ -3755,9 +3771,9 @@ async function runLocalInference(promptArr, callback) {
 
         const stream = await localEngine.chat.completions.create({
             messages,
-            temperature: webllmConfig.temperature ?? (isLightTier ? 0.18 : 0.65),
-            top_p: webllmConfig.topP ?? (isLightTier ? 0.78 : 0.9),
-            max_tokens: webllmConfig.maxTokens ?? (isLightTier ? 48 : 4096),
+            temperature: webllmConfig.temperature ?? (isLightTierEffective ? 0.18 : 0.65),
+            top_p: webllmConfig.topP ?? (isLightTierEffective ? 0.78 : 0.9),
+            max_tokens: webllmConfig.maxTokens ?? (isLightTierEffective ? 48 : 4096),
             stream: true
         });
 
@@ -3793,8 +3809,8 @@ async function runLocalInference(promptArr, callback) {
     const decoder = new TextDecoder("utf-8");
     
     await wllama.createCompletion(formatted, {
-        ...(isLightTier ? { nPredict: 32 } : {}),
-        sampling: isLightTier
+        ...(isLightTierEffective ? { nPredict: 32 } : {}),
+        sampling: isLightTierEffective
             ? { temp: 0.18, top_k: 12, top_p: 0.78, penalty_repeat: 1.22 }
             : { temp: 0.7, top_k: 40, top_p: 0.9 },
         onNewToken: (tokenIndex, tokenBytes) => {

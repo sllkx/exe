@@ -4,16 +4,18 @@
     const WEBGPU_ACTIVE_STORAGE_KEY = "ISAI_LOCAL_WEBGPU_ACTIVE_V1";
     const MODEL_MENU_ID = "local-model-shortcut-panel";
     const MODEL_MENU_STYLE_ID = "isai-local-model-shortcut-style-v2";
-    const SPEED_TIER_ORDER = ["code", "light", "middle", "hard"];
-    const MODEL_TYPE_ORDER = ["all", "gemma", "qwen", "huggingface", "granite", "ernie"];
+    const SPEED_TIER_ORDER = ["code", "superlight", "light", "middle", "hard"];
+    const MODEL_TYPE_ORDER = ["all", "gemma", "qwen", "huggingface", "llama_blue", "granite", "ernie"];
     const SLOT_ICON_MAP = {
         code: "ri-code-block",
+        superlight: "ri-windy-line",
         light: "ri-flashlight-line",
         middle: "ri-cpu-line",
         hard: "ri-focus-3-line"
     };
     const SPEED_TIER_ICON_MAP = {
         code: "ri-code-block",
+        superlight: "ri-windy-line",
         light: "ri-flashlight-line",
         middle: "ri-command-line",
         hard: "ri-fire-line"
@@ -46,6 +48,7 @@
                 codeFixed: "코드 모델은 고정입니다",
                 chatModel: "채팅 모델",
                 code: "코드",
+                superlight: "슈퍼라이트",
                 light: "라이트",
                 middle: "중간",
                 hard: "하드",
@@ -60,6 +63,7 @@
                 codeFixed: "Code model is fixed",
                 chatModel: "Chat model",
                 code: "Code",
+                superlight: "Superlight",
                 light: "Light",
                 middle: "Middle",
                 hard: "Hard",
@@ -74,6 +78,7 @@
                 codeFixed: "コードモデルは固定です",
                 chatModel: "チャットモデル",
                 code: "コード",
+                superlight: "スーパーライト",
                 light: "ライト",
                 middle: "ミドル",
                 hard: "ハード",
@@ -88,6 +93,7 @@
                 codeFixed: "代码模型已固定",
                 chatModel: "聊天模型",
                 code: "代码",
+                superlight: "超轻量",
                 light: "轻量",
                 middle: "中等",
                 hard: "高精度",
@@ -102,6 +108,7 @@
                 codeFixed: "El modelo de codigo es fijo",
                 chatModel: "Modelo de chat",
                 code: "Codigo",
+                superlight: "Superligero",
                 light: "Ligero",
                 middle: "Medio",
                 hard: "Preciso",
@@ -119,6 +126,15 @@
         if (value.startsWith("zh")) return "无法加载回复。";
         if (value.startsWith("es")) return "No pude cargar una respuesta.";
         return "I could not load a response.";
+    }
+
+    function getCharacterRecoveryText(locale) {
+        const value = String(locale || getLocale()).toLowerCase();
+        if (value.startsWith("ko")) return "잠깐 끊겼네. 다시 이어서 이야기해보자. 지금 네 마음에 가장 먼저 떠오르는 건 뭐야?";
+        if (value.startsWith("ja")) return "少し途切れたみたい。もう一度ゆっくり続けよう。今いちばん浮かぶ気持ちは何？";
+        if (value.startsWith("zh")) return "刚刚有点中断了。我们慢慢继续聊吧。你现在最先想到的感受是什么？";
+        if (value.startsWith("es")) return "Se corto un momento. Sigamos con calma. Que es lo primero que te viene a la mente ahora?";
+        return "Looks like we got interrupted for a moment. Let's continue slowly. What's the first thing on your mind right now?";
     }
 
     function getSpeedPresets() {
@@ -234,6 +250,7 @@
         if (hay.includes("smollm") || hay.includes("huggingface")) return "huggingface";
         if (hay.includes("gemma")) return "gemma";
         if (hay.includes("granite")) return "granite";
+        if (hay.includes("bonsai")) return "ernie";
         if (hay.includes("ernie")) return "ernie";
         if (hay.includes("qwen")) return "qwen";
         return "gemma";
@@ -268,7 +285,7 @@
     function getResolvedProfiles() {
         const baseProfiles = clone(window.__ISAI_LOCAL_MODEL_PROFILES || {});
         const chatItem = getActiveChatModelItem();
-        ["light", "middle", "hard"].forEach((tierKey) => {
+        ["superlight", "light", "middle", "hard"].forEach((tierKey) => {
             if (!baseProfiles[tierKey] || !chatItem) return;
             baseProfiles[tierKey].modelId = chatItem.id;
             baseProfiles[tierKey].modelName = chatItem.name;
@@ -336,8 +353,21 @@
         if (type === "huggingface") return `<span class="local-model-provider-badge huggingface${sizeClass}">H</span>`;
         if (type === "granite") return `<span class="local-model-provider-badge granite${sizeClass}"><span class="model-provider-glyph">G</span></span>`;
         if (type === "gemma") return `<span class="local-model-provider-badge${sizeClass}"><i class="ri-gemini-fill"></i></span>`;
-        if (type === "ernie") return `<span class="local-model-provider-badge ernie${sizeClass}"><span class="model-provider-glyph">E</span></span>`;
+        if (type === "ernie") return `<span class="local-model-provider-badge ernie${sizeClass}"><span class="model-provider-glyph">B</span></span>`;
+        if (type === "llama_blue") return `<span class="local-model-provider-badge llama-blue${sizeClass}"><span class="model-provider-glyph">L</span></span>`;
         return `<span class="local-model-provider-badge qwen${sizeClass}"><i class="ri-qwen-ai-fill"></i></span>`;
+    }
+
+    function getBadgeTypeForItem(item) {
+        const hay = `${item && item.id ? item.id : ""} ${item && item.name ? item.name : ""}`.toLowerCase();
+        if (hay.includes("tinyllama")) return "llama_blue";
+        return getModelType(item);
+    }
+
+    function getFilterTypeForItem(item) {
+        const badgeType = getBadgeTypeForItem(item);
+        if (badgeType === "llama_blue") return badgeType;
+        return getModelType(item);
     }
 
     function ensureLocalModelMenuStyle() {
@@ -345,34 +375,45 @@
         const style = document.createElement("style");
         style.id = MODEL_MENU_STYLE_ID;
         style.textContent = `
-#local-model-tier-wrapper{max-width:min(78vw,328px);overflow:visible!important}
-#local-model-tier-list{display:flex;align-items:center;gap:5px;flex-wrap:nowrap}
+#local-model-tier-wrapper{position:absolute;top:12px;right:16px;width:fit-content!important;max-width:min(76vw,304px);border-radius:9999px;overflow:visible}
+#local-model-tier-list{position:relative;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;width:max-content;max-width:min(calc(100vw - 16px),312px);padding:4px 4px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%)}
+#local-model-tier-list #local-model-tier-menu-btn{position:sticky;right:0;z-index:6;background:rgba(255,255,255,.035)}
+@media (max-width: 768px){#local-model-tier-wrapper{position:fixed;top:12px;right:74px;left:auto;width:fit-content!important;max-width:min(calc(100vw - 88px),264px);z-index:90;border-radius:9999px;overflow:visible}#local-model-tier-list{max-width:min(calc(100vw - 88px),214px);gap:4px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%)}}
 .local-model-tier-btn,.local-model-tier-menu-btn,.local-model-tier-icon-btn{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.64);color:rgba(255,255,255,.84);font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:5px;cursor:pointer;transition:all .16s ease}
 .local-model-tier-menu-btn,.local-model-tier-icon-btn{width:28px;min-width:28px;min-height:28px;max-width:28px;max-height:28px;aspect-ratio:1/1;flex:0 0 28px;padding:0;overflow:hidden;box-sizing:border-box}
-.local-model-tier-btn:hover,.local-model-tier-btn.active,.local-model-tier-menu-btn:hover,.local-model-tier-menu-btn.is-open,.local-model-tier-icon-btn:hover,.local-model-tier-icon-btn.active{background:#fff;color:#111;border-color:#fff}
-.local-model-shortcut-panel{position:absolute;top:calc(100% + 8px);left:0;right:0;width:100%;min-width:100%;max-width:100%;height:min(208px,calc(100vh - 220px));max-height:min(208px,calc(100vh - 220px));padding:5px;border-radius:11px;border:1px solid rgba(255,255,255,.12);background:rgba(10,10,11,.96);backdrop-filter:blur(14px);display:none;flex-direction:column;z-index:50;overflow:hidden!important;box-sizing:border-box}
+.local-model-tier-btn>i,.local-model-tier-menu-btn>i,.local-model-tier-icon-btn>i{width:100%;height:100%;display:flex;align-items:center;justify-content:center;line-height:1;margin:0;padding:0;text-align:center}
+#local-model-tier-menu-btn>i{font-size:12px!important}
+#btn-webgpu>i{font-size:12px!important}
+.local-model-tier-btn:hover,.local-model-tier-btn.active,.local-model-tier-icon-btn:hover,.local-model-tier-icon-btn.active{background:#fff;color:#111;border-color:#fff}
+.local-model-tier-menu-btn:hover,.local-model-tier-menu-btn.is-open{background:rgba(255,255,255,.12);color:rgba(255,255,255,.94);border-color:rgba(255,255,255,.16)}
+.local-model-tier-menu-btn:hover>i,.local-model-tier-menu-btn.is-open>i{color:inherit!important}
+.local-model-shortcut-panel{position:absolute;top:calc(100% + 8px);left:0;right:0;width:100%;min-width:100%;max-width:100%;height:min(194px,calc(100vh - 240px));max-height:min(194px,calc(100vh - 240px));padding:5px;border-radius:11px;border:1px solid rgba(255,255,255,.12);background:rgba(10,10,11,.96);backdrop-filter:blur(14px);display:none;flex-direction:column;z-index:50;overflow:hidden!important;box-sizing:border-box}
 .local-model-shortcut-panel.is-open{display:flex}
 .local-model-shortcut-head{display:flex;align-items:center;gap:5px;margin-bottom:5px;flex:0 0 auto}
 .local-model-shortcut-current{display:none!important}
 .local-model-filter-row{display:flex;align-items:center;gap:3px;flex:1 1 auto;overflow-x:auto}
 .local-model-filter-row::-webkit-scrollbar{display:none}
 .local-model-filter-row > button:first-child{display:none!important}
-.local-model-filter-btn{width:22px;height:22px;min-width:22px;min-height:22px;max-width:22px;max-height:22px;aspect-ratio:1/1;border:none;border-radius:999px;background:transparent;color:rgba(255,255,255,.76);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .16s ease;flex:0 0 22px;padding:0;overflow:hidden;box-sizing:border-box}
+.local-model-filter-btn{width:28px;height:28px;min-width:28px;min-height:28px;max-width:28px;max-height:28px;aspect-ratio:1/1;border:none;border-radius:999px;background:transparent;color:rgba(255,255,255,.76);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .16s ease;flex:0 0 28px;padding:0;overflow:hidden;box-sizing:border-box}
 .local-model-filter-btn:hover,.local-model-filter-btn.is-active{background:rgba(255,255,255,.14);color:#fff}
 .local-model-filter-btn.provider-huggingface{background:#facc15;border:1px solid #fde047;color:#111}
 .local-model-filter-btn.provider-huggingface:hover,.local-model-filter-btn.provider-huggingface.is-active{background:#facc15;color:#111;border-color:#fde68a}
+.local-model-filter-btn.provider-qwen{background:linear-gradient(180deg,#7c3aed,#5b21b6);border:1px solid rgba(196,181,253,.42);color:#fff}
+.local-model-filter-btn.provider-qwen:hover,.local-model-filter-btn.provider-qwen.is-active{background:linear-gradient(180deg,#7c3aed,#5b21b6);color:#fff;border-color:rgba(216,180,254,.62)}
+.local-model-filter-btn.provider-llama_blue{background:#2563eb;border:1px solid #60a5fa;color:#fff}
+.local-model-filter-btn.provider-llama_blue:hover,.local-model-filter-btn.provider-llama_blue.is-active{background:#2563eb;color:#fff;border-color:#93c5fd}
 .local-model-filter-btn.provider-granite{background:#2563eb;border:1px solid #3b82f6;color:#fff}
 .local-model-filter-btn.provider-granite:hover,.local-model-filter-btn.provider-granite.is-active{background:#2563eb;color:#fff;border-color:#60a5fa}
 .local-model-catalog-scroll{display:block!important;flex:1 1 auto;min-height:0;height:0;max-height:100%;overflow-y:auto!important;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.22) transparent;padding-right:1px}
 .local-model-catalog-scroll::-webkit-scrollbar{width:4px}
 .local-model-catalog-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22);border-radius:999px}
 .local-model-catalog-grid{display:flex;flex-direction:column;gap:5px}
-.local-model-catalog-card{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:6px 8px;border-radius:11px;border:1px solid rgba(255,255,255,.10);background:#151515;cursor:pointer;transition:all .16s ease}
+.local-model-catalog-card{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:6px 8px;border-radius:10px;border:1px solid rgba(255,255,255,.10);background:#151515;cursor:pointer;transition:all .16s ease}
 .local-model-catalog-card:hover,.local-model-catalog-card.is-selected{border-color:rgba(255,255,255,.3);background:#1b1b1b}
 .local-model-catalog-card.is-fixed{cursor:default;opacity:.92}
 .local-model-catalog-card-main{min-width:0;display:flex;align-items:center;gap:7px;flex:1 1 auto}
-.local-model-provider-button{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;min-height:20px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.03);padding:0;flex:0 0 auto}
-.local-model-provider-badge{display:grid;place-items:center;width:20px;height:20px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;flex:0 0 auto;position:relative;overflow:hidden}
+.local-model-provider-button{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;min-width:18px;min-height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.03);padding:0;flex:0 0 auto}
+.local-model-provider-badge{display:grid;place-items:center;width:18px;height:18px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;flex:0 0 auto;position:relative;overflow:hidden}
 .local-model-provider-badge i,.local-model-provider-badge .hf-glyph,.local-model-provider-badge .model-provider-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;line-height:1;margin:0;padding:0}
 .local-model-provider-badge i::before{display:block;line-height:1;margin:0}
 .local-model-provider-badge.huggingface{background:#facc15!important;border-color:#fde047!important;color:#fff!important;font-weight:900;font-size:10px;line-height:1}
@@ -380,14 +421,19 @@
 .local-model-provider-badge.qwen{background:linear-gradient(180deg,#7c3aed,#5b21b6);border-color:rgba(196,181,253,.42);color:#fff;font-weight:800}
 .local-model-provider-badge.qwen i{font-size:11px;line-height:1;color:#fff}
 .local-model-provider-badge.ernie{position:relative;background:#0b0b0b;border-color:#3a3a3a;color:#fff;font-weight:800}
+.local-model-provider-badge.llama-blue{position:relative;background:#2563eb;border-color:#60a5fa;color:#fff;font-weight:900}
 .local-model-provider-badge.ernie .model-provider-glyph,.local-model-provider-badge.granite .model-provider-glyph{font-size:10px;font-weight:800}
-.local-model-provider-badge.is-compact{width:15px;height:15px;border-width:0;background:transparent}
-.local-model-provider-button .local-model-provider-badge.is-compact{width:14px;height:14px;min-width:14px;min-height:14px;border-width:0;background:transparent!important;box-shadow:none!important;display:flex;align-items:center;justify-content:center}
+.local-model-provider-badge.llama-blue .model-provider-glyph{font-size:10px;font-weight:900}
+.local-model-provider-badge.is-compact{width:14px;height:14px;border-width:0;background:transparent}
+.local-model-provider-button .local-model-provider-badge.is-compact{width:13px;height:13px;min-width:13px;min-height:13px;border-width:0;background:transparent!important;box-shadow:none!important;display:flex;align-items:center;justify-content:center}
 .local-model-provider-button .local-model-provider-badge.huggingface.is-compact{background:#facc15!important;border-color:#fde047!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)!important}
 .local-model-provider-button .local-model-provider-badge.qwen.is-compact{background:linear-gradient(180deg,#7c3aed,#5b21b6)!important;border-color:rgba(196,181,253,.42)!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important}
 .local-model-provider-button .local-model-provider-badge.gemma.is-compact{background:#2563eb!important;border-color:#60a5fa!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important}
 .local-model-provider-button .local-model-provider-badge.granite.is-compact{background:#2563eb!important;border-color:#3b82f6!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important}
 .local-model-provider-button .local-model-provider-badge.ernie.is-compact{background:#0b0b0b!important;border-color:#3a3a3a!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important}
+.local-model-provider-button .local-model-provider-badge.llama-blue.is-compact{background:#2563eb!important;border-color:#60a5fa!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important}
+.local-model-provider-badge.qwen.is-compact{background:linear-gradient(180deg,#7c3aed,#5b21b6)!important;border-color:rgba(196,181,253,.42)!important;color:#fff!important}
+.local-model-provider-badge.llama-blue.is-compact{background:#2563eb!important;border-color:#60a5fa!important;color:#fff!important}
 .local-model-provider-button .local-model-provider-badge.qwen.is-compact i{font-size:11px}
 .local-model-provider-badge.qwen.is-compact i{font-size:11px}
 .local-model-provider-badge i{font-size:11px}
@@ -706,17 +752,18 @@
         scrollBox.className = "local-model-catalog-scroll";
         const grid = document.createElement("div");
         grid.className = "local-model-catalog-grid";
-        const items = getChatCatalogItems(activeTier).filter((item) => activeFilter === "all" ? true : getModelType(item) === activeFilter);
+        const items = getChatCatalogItems(activeTier).filter((item) => activeFilter === "all" ? true : getFilterTypeForItem(item) === activeFilter);
 
         items.forEach((item) => {
             const modelType = getModelType(item);
+            const badgeType = getBadgeTypeForItem(item);
             const isCodeCard = activeTier === "code";
             const isSelected = isCodeCard ? item.id === "qwen_coder_05b_q3kl" : item.id === selectedChatModelId;
             const card = document.createElement("div");
             card.className = `local-model-catalog-card${isSelected ? " is-selected" : ""}${isCodeCard ? " is-fixed" : ""}`;
             card.innerHTML = `
                 <div class="local-model-catalog-card-main">
-                    <span class="local-model-provider-button" aria-hidden="true">${getButtonBadge(modelType, true)}</span>
+                    <span class="local-model-provider-button" aria-hidden="true">${getButtonBadge(badgeType, true)}</span>
                     <div class="local-model-catalog-name" title="${item.name}">${item.name}</div>
                 </div>
                 <span class="local-model-size-pill">${item.popupSizeText || ""}</span>
@@ -846,7 +893,7 @@
                 const targetSeqLen = Math.min(
                     Math.max(
                         speedConfig && speedConfig.maxSeqLen ? Number(speedConfig.maxSeqLen) : 256,
-                        384
+                        128
                     ),
                     2048
                 );
@@ -942,6 +989,7 @@
         const profile = applyLocalModelProfileToConfig();
         const speedConfig = getSpeedPresetForTier(profile && profile.key) || {};
         const isLightTier = !!(profile && profile.key === "light");
+        const isSuperlightTier = !!(profile && profile.key === "superlight");
         const currentUiMode = String(
             window.currentMode
             || window.selectedMode
@@ -953,7 +1001,8 @@
             && window.ISAI_CHARACTER_CHAT_SESSION.active
         );
         const isCodeMode = currentUiMode === "code";
-        const isLightTierEffective = isLightTier && !isCodeMode && !isCharacterChat;
+        const isLightTierEffective = (isLightTier || isSuperlightTier) && !isCodeMode;
+        const isCharacterLiteMode = isCharacterChat && !isCodeMode;
         const outputLocale = String(
             (document && document.documentElement && document.documentElement.lang)
             || (navigator && navigator.language)
@@ -982,6 +1031,33 @@
             ]);
             return !blocked.has(normalized);
         });
+        if (isCharacterLiteMode) {
+            messages = messages.map((msg) => {
+                if (!msg || typeof msg !== "object") return msg;
+                const role = String(msg.role || "user").toLowerCase();
+                const content = String(msg.content || "");
+                if (role !== "system") {
+                    return { role, content: content.slice(0, 220) };
+                }
+                const lines = content
+                    .split(/\r?\n/)
+                    .map((line) => String(line || "").trim())
+                    .filter(Boolean);
+                const picked = lines.filter((line) => (
+                    /^you are roleplaying/i.test(line) ||
+                    /^scene setup:/i.test(line) ||
+                    /^character:/i.test(line) ||
+                    /^personality:/i.test(line) ||
+                    /^speech style:/i.test(line) ||
+                    /^start with a realistic/i.test(line) ||
+                    /^stay in character/i.test(line) ||
+                    /^reply in the user/i.test(line) ||
+                    /^keep responses concise/i.test(line)
+                ));
+                const compactSystem = (picked.length ? picked : lines).join("\n").slice(0, 420);
+                return { role: "system", content: compactSystem };
+            });
+        }
         if (!messages.length) return;
         async function ensureCompatEngineForLocalFallback() {
             const createEngine = getRuntimeCreateEngine();
@@ -1010,7 +1086,7 @@
                 try {
                     await compatEngine.loadModel(candidateUrl, {
                         speedPreset: speedConfig.enginePreset || "balanced",
-                        maxSeqLen: Math.max(speedConfig.maxSeqLen || 256, isCharacterChat ? 768 : (isLightTierEffective ? 384 : 640))
+                        maxSeqLen: Math.max(speedConfig.maxSeqLen || 256, isCharacterLiteMode ? 192 : (isSuperlightTier ? 64 : (isLightTierEffective ? 128 : 640)))
                     });
                     profile.fallbackUrl = candidateUrl;
                     lastError = null;
@@ -1036,13 +1112,18 @@
                 } catch (error) {}
             }
             let emittedWebllmToken = false;
-            const stream = await localEngine.chat.completions.create({
+            const webllmRequest = {
                 messages,
-                temperature: isLightTierEffective ? 0.18 : 0.45,
-                top_p: isLightTierEffective ? 0.78 : 0.82,
-                max_tokens: isCharacterChat ? 220 : (isLightTierEffective ? 48 : 220),
+                temperature: isCharacterLiteMode ? 0.16 : (isSuperlightTier ? 0.1 : (isLightTierEffective ? 0.18 : 0.45)),
+                top_p: isCharacterLiteMode ? 0.74 : (isSuperlightTier ? 0.5 : (isLightTierEffective ? 0.78 : 0.82)),
                 stream: true
-            });
+            };
+            if (isCharacterLiteMode) {
+                webllmRequest.max_tokens = 48;
+            } else if (isSuperlightTier) {
+                webllmRequest.max_tokens = 512;
+            }
+            const stream = await localEngine.chat.completions.create(webllmRequest);
             for await (const chunk of stream) {
                 if (stopSignal) {
                     if (typeof localEngine.interruptGenerate === "function") {
@@ -1565,6 +1646,33 @@
             return removed ? kept.join("").trimEnd() : source;
         }
 
+        function trimTrailingDuplicateSentenceBlock(text) {
+            const source = String(text || "").trimEnd();
+            if (!source || source.length < 80) return source;
+
+            const sentenceItems = (source.match(/[^.!?\n]+[.!?]?(?:\s+|$)|[^\n]+\n?/g) || [])
+                .map((raw) => ({
+                    raw,
+                    key: normalizeRepeatKey(
+                        String(raw || "")
+                            .replace(/^\d+\.\s*/g, "")
+                            .replace(/^[-*]\s*/g, "")
+                    )
+                }))
+                .filter((item) => item.key);
+            if (sentenceItems.length < 3) return source;
+
+            const lastItem = sentenceItems[sentenceItems.length - 1];
+            if (lastItem.key.length < 18 || String(lastItem.raw || "").trim().length < 24) return source;
+
+            const earlierIndex = sentenceItems.slice(0, -1).map((item) => item.key).lastIndexOf(lastItem.key);
+            if (earlierIndex >= 0) {
+                return sentenceItems.slice(0, earlierIndex + 1).map((item) => item.raw).join("").trimEnd();
+            }
+
+            return source;
+        }
+
         function hasExcessiveRepetition(text) {
             const source = String(text || "");
             if (!source || source.length < 80) return false;
@@ -1683,12 +1791,16 @@
                     trimRestartedSentenceBlock(trimRestartedPrefixBlock(cleanedText || aggregatedText))
                 );
                 let nextText = trimRepeatedSentenceHistory(
-                    trimRestartedSentenceBlock(trimDuplicateParagraphs(trimRepeatedTail(currentText)))
+                    trimTrailingDuplicateSentenceBlock(
+                        trimRestartedSentenceBlock(trimDuplicateParagraphs(trimRepeatedTail(currentText)))
+                    )
                 );
                 if (!nextText) continue;
                 nextText = trimRestartedPrefixBlock(nextText);
                 nextText = trimRepeatedSentenceHistory(
-                    trimRestartedSentenceBlock(trimDuplicateParagraphs(nextText))
+                    trimTrailingDuplicateSentenceBlock(
+                        trimRestartedSentenceBlock(trimDuplicateParagraphs(nextText))
+                    )
                 );
 
                 if (normalizeRepeatKey(nextText) === normalizeRepeatKey(renderedText)) {
@@ -1736,15 +1848,17 @@
                 }
 
                 repetitionHits = 0;
-                renderedText = nextText;
+                renderedText = trimTrailingDuplicateSentenceBlock(nextText);
                 callback(renderedText, { replace: true, isStreaming: true });
             }
 
             if (!hasRenderableLocalText(renderedText || "") && hasRenderableLocalText(aggregatedText || "")) {
                 const fallbackText = trimRepeatedSentenceHistory(
                     trimRestartedSentenceBlock(
-                        trimDuplicateParagraphs(
+                        trimTrailingDuplicateSentenceBlock(
+                            trimDuplicateParagraphs(
                             trimRestartedPrefixBlock(cleanupAssistantBoilerplateAscii(aggregatedText))
+                            )
                         )
                     )
                 );
@@ -1753,7 +1867,7 @@
                 }
             }
 
-            return renderedText;
+            return trimTrailingDuplicateSentenceBlock(renderedText);
         }
 
         async function generateWithOptions(generationOptions) {
@@ -1782,15 +1896,46 @@
                     callback(rawRendered, { replace: true, isStreaming: true });
                 }
             }
-            return String(rawRendered || "").trim();
+            return trimTrailingDuplicateSentenceBlock(String(rawRendered || "").trim());
+        }
+
+        async function generateCharacterEmergencyReply() {
+            if (!isCharacterLiteMode) return "";
+            const lastUser = [...messages].reverse().find((msg) => (
+                msg && String(msg.role || "").toLowerCase() === "user" && String(msg.content || "").trim()
+            ));
+            if (!lastUser) return "";
+            const emergencyMessages = [
+                { role: "system", content: "Stay in character. Reply naturally in the user's language in 1 short sentence. No meta." },
+                { role: "user", content: String(lastUser.content || "").slice(0, 220) }
+            ];
+            const stream = await localEngine.generateChat(emergencyMessages, {
+                useCache: false,
+                nPredict: 56,
+                sampling: { temp: 0.2, top_k: 16, top_p: 0.82, penalty_repeat: 1.08 }
+            });
+            let text = "";
+            for await (const chunk of stream) {
+                if (stopSignal) break;
+                const part = sanitizeStreamText(readLocalChunkText(chunk));
+                if (!part) continue;
+                text = text ? (text + trimIncomingOverlap(text, part)) : part;
+            }
+            return trimTrailingDuplicateSentenceBlock(String(text || "").trim());
         }
 
         let renderedText = await generateWithOptions({
-            ...(isLightTierEffective ? { nPredict: 64 } : {}),
-            useCache: !isLightTierEffective,
-            sampling: speedConfig.sampling || (isLightTierEffective
+            ...(isCharacterLiteMode
+                ? { nPredict: 24 }
+                : (isSuperlightTier ? { nPredict: 512 } : {})),
+            useCache: !(isLightTierEffective || isCharacterLiteMode),
+            sampling: speedConfig.sampling || (isCharacterLiteMode
+                ? { temp: 0.16, top_k: 10, top_p: 0.74, penalty_repeat: 1.18 }
+                : (isSuperlightTier
+                ? { temp: 0.1, top_k: 1, top_p: 0.5, penalty_repeat: 1.0 }
+                : (isLightTierEffective
                 ? { temp: 0.18, top_k: 12, top_p: 0.78, penalty_repeat: 1.22 }
-                : { temp: 0.45, top_k: 32, top_p: 0.88, penalty_repeat: 1.14 })
+                : { temp: 0.45, top_k: 32, top_p: 0.88, penalty_repeat: 1.14 })))
         });
 
         if (!hasRenderableLocalText(renderedText || "")) {
@@ -1813,7 +1958,7 @@
         if (!hasRenderableLocalText(renderedText || "")) {
             renderedText = await generateWithRawOptions({
                 useCache: false,
-                nPredict: isLightTierEffective ? 96 : 220,
+                nPredict: isCharacterLiteMode ? 64 : (isLightTierEffective ? 120 : 220),
                 sampling: {
                     temp: 0.22,
                     top_k: 28,
@@ -1824,7 +1969,21 @@
         }
 
         if (!hasRenderableLocalText(renderedText || "")) {
-            callback(emptyResponseText, { replace: true, isStreaming: false });
+            try {
+                const emergency = await generateCharacterEmergencyReply();
+                if (hasRenderableLocalText(emergency || "")) {
+                    renderedText = emergency;
+                    callback(renderedText, { replace: true, isStreaming: false });
+                }
+            } catch (error) {}
+        }
+
+        if (!hasRenderableLocalText(renderedText || "")) {
+            if (isCharacterChat) {
+                callback(getCharacterRecoveryText(outputLocale), { replace: true, isStreaming: false });
+            } else {
+                callback(emptyResponseText, { replace: true, isStreaming: false });
+            }
         }
     };
 

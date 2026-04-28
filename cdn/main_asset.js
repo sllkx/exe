@@ -80,6 +80,7 @@ function setMainGeneratingState(nextState) {
 }
 
 window.__ISAI_MAIN_GENERATING__ = !!window.__ISAI_MAIN_GENERATING__;
+window.ISAI_NO_TEXT_LIMIT = window.ISAI_NO_TEXT_LIMIT !== false;
 
 let currentAppPage = 1;
 let isAppLoading = false;
@@ -695,9 +696,9 @@ function normalizeAppPayload(raw) {
 }
 
 function getIsaiApiMaxChars() {
-    const raw = Number(window.ISAI_API_MAX_CHARS || 700);
-    if (!Number.isFinite(raw)) return 700;
-    return Math.max(120, Math.min(4000, Math.floor(raw)));
+    const raw = Number(window.ISAI_API_MAX_CHARS || 32768);
+    if (!Number.isFinite(raw)) return 32768;
+    return Math.max(120, Math.floor(raw));
 }
 
 function getContinueWriteButton() {
@@ -893,10 +894,12 @@ function normalizeCharacterChatPromptText(raw) {
         .trim();
 }
 
-function sanitizeCharacterChatText(raw, maxLen = 1600) {
+function sanitizeCharacterChatText(raw, maxLen = 8192) {
     const text = String(raw || "").replace(/\r/g, "").trim();
     if (!text) return "";
-    return text.length > maxLen ? text.slice(0, maxLen) : text;
+    if (window.ISAI_NO_TEXT_LIMIT === true || window.ISAI_NO_TEXT_LIMIT === "true") return text;
+    const safeMax = Math.max(1, Math.floor(Number(maxLen) || 0) || 8192);
+    return text.length > safeMax ? text.slice(0, safeMax) : text;
 }
 
 function getCharacterChatUiLanguage() {
@@ -2197,12 +2200,15 @@ async function executeAction(side = "right", options = {}) {
                     await runLocalInference(localPromptArr, (token, meta = {}) => {
                         if (!stopSignal) {
                             localResult = meta.replace ? token : (localResult + token);
-                            if (!isScopedCodeEdit || !scopedTarget) {
-                                setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: false });
+                        if (!isScopedCodeEdit || !scopedTarget) {
+                            setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: false });
+                            if (typeof window.syncGeneratedCodeEditorFromText === "function") {
+                                window.syncGeneratedCodeEditorFromText(localResult);
                             }
-                            scrollBottom();
                         }
-                    });
+                        scrollBottom();
+                    }
+                });
                     
                     if (!stopSignal) {
                         if (isScopedCodeEdit && scopedTarget) {
@@ -2211,6 +2217,9 @@ async function executeAction(side = "right", options = {}) {
                             if (applied && typeof showToast === "function") showToast(getScopedCodeText("applied"));
                         } else {
                             setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: true });
+                            if (typeof window.syncGeneratedCodeEditorFromText === "function") {
+                                window.syncGeneratedCodeEditorFromText(localResult);
+                            }
                             updateCodeUI(localResult);
                             let historyResult = localResult.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                             chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
@@ -2242,6 +2251,9 @@ async function executeAction(side = "right", options = {}) {
                                 localResult = meta.replace ? token : (localResult + token);
                                 if (!isScopedCodeEdit || !scopedTarget) {
                                     setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: false });
+                                    if (typeof window.syncGeneratedCodeEditorFromText === "function") {
+                                        window.syncGeneratedCodeEditorFromText(localResult);
+                                    }
                                 }
                                 scrollBottom();
                             }
@@ -2254,6 +2266,9 @@ async function executeAction(side = "right", options = {}) {
                                 if (applied && typeof showToast === "function") showToast(getScopedCodeText("applied"));
                             } else {
                                 setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: true });
+                                if (typeof window.syncGeneratedCodeEditorFromText === "function") {
+                                    window.syncGeneratedCodeEditorFromText(localResult);
+                                }
                                 updateCodeUI(localResult);
                                 let historyResult = localResult.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                                 chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
@@ -2294,6 +2309,9 @@ async function executeAction(side = "right", options = {}) {
                             scrollBottom();
                         } else {
                             setAssistantBubbleBodyLocal(bubble, renderedResponse, { forcePlainText: shouldForceCodePrompt, isFinished: true });
+                            if (typeof window.syncGeneratedCodeEditorFromText === "function") {
+                                window.syncGeneratedCodeEditorFromText(renderedResponse);
+                            }
                             updateCodeUI(renderedResponse);
                             let historyResult = renderedResponse.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                             chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
@@ -5091,10 +5109,12 @@ function renderAssistantBubbleContentLocal(text, isFinished = false, options = {
 
 function setAssistantBubbleBodyLocal(bubble, text, options = {}) {
     if (!bubble) return;
-    const rawText = trimRepeatedDisplayText(String(text ?? ""));
+    const sourceText = String(text ?? "");
+    const preserveRawDisplay = currentMode === "code" || looksLikeCodeOrHtmlResponseLocal(sourceText);
+    const rawText = preserveRawDisplay ? sourceText.trimEnd() : trimRepeatedDisplayText(sourceText);
     const plainText = extractPlainTextLocal(rawText);
     if (!plainText) {
-        const rawFallback = String(rawText || "")
+        const rawFallback = preserveRawDisplay ? String(rawText || "").trim() : String(rawText || "")
             .replace(/<think>[\s\S]*?(<\/think>|$)/gi, " ")
             .replace(/```json/gi, "")
             .replace(/```/g, "")
@@ -5118,10 +5138,23 @@ function setAssistantBubbleBodyLocal(bubble, text, options = {}) {
         bubble.textContent = fallback;
         return;
     }
-    bubble.style.whiteSpace = "";
-    bubble.style.wordBreak = "";
-    bubble.style.fontFamily = "";
-    bubble.style.lineHeight = "";
+    if (preserveRawDisplay) {
+        bubble.style.whiteSpace = "pre-wrap";
+        bubble.style.wordBreak = "break-word";
+        bubble.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        bubble.style.lineHeight = "1.5";
+        bubble.style.overflowX = "auto";
+        bubble.style.overflowY = "visible";
+        bubble.style.maxHeight = "none";
+    } else {
+        bubble.style.whiteSpace = "";
+        bubble.style.wordBreak = "";
+        bubble.style.fontFamily = "";
+        bubble.style.lineHeight = "";
+        bubble.style.overflowX = "";
+        bubble.style.overflowY = "";
+        bubble.style.maxHeight = "";
+    }
     bubble.innerHTML = renderAssistantBubbleContentLocal(rawText, !!options.isFinished, options);
 }
 
@@ -5892,6 +5925,20 @@ function updateCodePanel(text) {
         renderCodeTabs();
     }
 }
+
+window.syncGeneratedCodeEditorFromText = function(text) {
+    const rawText = String(text ?? "");
+    if (window.extractedCodes && window.extractedCodes.length > 0) {
+        codeFiles = [...window.extractedCodes];
+        renderCodeTabs();
+        return true;
+    }
+    if (currentMode === "code") {
+        updateCodePanel(normalizeCodeLikeResponseForBubbleLocal(rawText));
+        return true;
+    }
+    return false;
+};
 
 function getCodeTabIcon(lang = "", name = "") {
     const key = String(lang || name || "").toLowerCase();
@@ -6920,7 +6967,3 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
         }, 0);
     });
 })();
-
-
-
-

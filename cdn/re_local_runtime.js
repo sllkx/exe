@@ -800,6 +800,170 @@
             : null;
     }
 
+    function getSimpleLocalChunkText(chunk) {
+        if (chunk == null) return "";
+        if (typeof chunk === "string" || typeof chunk === "number") return String(chunk);
+
+        const decoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
+        const decodeBytes = (value) => {
+            if (!decoder || typeof Uint8Array === "undefined" || !(value instanceof Uint8Array)) return "";
+            return decoder.decode(value, { stream: true });
+        };
+
+        if (typeof Uint8Array !== "undefined" && chunk instanceof Uint8Array) {
+            return decodeBytes(chunk);
+        }
+
+        const directValues = [
+            chunk.currentText,
+            chunk.text,
+            chunk.content,
+            chunk.tokenText,
+            chunk.value,
+            chunk.delta && chunk.delta.content
+        ];
+        for (const value of directValues) {
+            if (value == null) continue;
+            if (typeof value === "string" || typeof value === "number") return String(value);
+            const decoded = decodeBytes(value);
+            if (decoded) return decoded;
+        }
+
+        const firstChoice = Array.isArray(chunk.choices) ? chunk.choices[0] : null;
+        if (firstChoice && typeof firstChoice === "object") {
+            const choiceValues = [
+                firstChoice.text,
+                firstChoice.content,
+                firstChoice.delta && firstChoice.delta.content,
+                firstChoice.message && firstChoice.message.content
+            ];
+            for (const value of choiceValues) {
+                if (value == null) continue;
+                if (typeof value === "string" || typeof value === "number") return String(value);
+                const decoded = decodeBytes(value);
+                if (decoded) return decoded;
+            }
+        }
+
+        if (Array.isArray(chunk)) {
+            for (const item of chunk) {
+                const value = getSimpleLocalChunkText(item);
+                if (value) return value;
+            }
+        }
+
+        return "";
+    }
+
+    function trimSimpleLocalOverlap(baseText, incomingText) {
+        const base = String(baseText || "");
+        const incoming = String(incomingText || "");
+        const maxOverlap = Math.min(base.length, incoming.length, 256);
+        for (let size = maxOverlap; size > 0; size -= 1) {
+            if (base.slice(-size) === incoming.slice(0, size)) {
+                return incoming.slice(size);
+            }
+        }
+        return incoming;
+    }
+
+    async function runSimpleLocalInference(promptArr, callback) {
+        if (isLocalActive && !isModelLoaded) {
+            await startDownload();
+        }
+
+        const profile = applyLocalModelProfileToConfig();
+        const speedConfig = getSpeedPresetForTier(profile && profile.key) || {};
+        const currentUiMode = String(
+            window.currentMode
+            || window.selectedMode
+            || (document.body && document.body.getAttribute("data-ui-mode"))
+            || "chat"
+        ).toLowerCase();
+        const isCodeMode = currentUiMode === "code";
+        const isCharacterChat = !!(window.ISAI_CHARACTER_CHAT_SESSION && window.ISAI_CHARACTER_CHAT_SESSION.active);
+        const isCharacterLiteMode = isCharacterChat && !isCodeMode;
+        const isLightTier = !!(profile && profile.key === "light");
+        const isSuperlightTier = !!(profile && profile.key === "superlight");
+        const isLightTierEffective = (isLightTier || isSuperlightTier) && !isCodeMode;
+        const outputLocale = String(
+            (document && document.documentElement && document.documentElement.lang)
+            || (navigator && navigator.language)
+            || "en"
+        ).toLowerCase();
+        const emptyResponseText = getEmptyLocalResponseText(outputLocale);
+
+        let messages = typeof mapPromptMessagesForLocalEngine === "function"
+            ? mapPromptMessagesForLocalEngine(promptArr)
+            : Array.isArray(promptArr) ? promptArr.slice() : [];
+        messages = messages.filter((msg) => msg && String(msg.role || "").trim() && String(msg.content || "").trim());
+        if (!messages.length) return "";
+
+        if (!localEngine || typeof localEngine.generateChat !== "function") {
+            throw new Error("Wllama local engine is not ready.");
+        }
+
+        if (typeof localEngine.clearChatState === "function") {
+            try {
+                await localEngine.clearChatState();
+            } catch (error) {}
+        }
+
+        const tokenFloor = isCharacterLiteMode ? 192 : (isCodeMode ? 2048 : (isLightTierEffective ? 1536 : 4096));
+        const maxTokens = Math.max(
+            tokenFloor,
+            Number(window.ISAI_LOCAL_MAX_OUTPUT_TOKENS || 0),
+            Number(speedConfig.maxOutputTokens || speedConfig.maxTokens || speedConfig.nPredict || 0)
+        );
+        const sampling = speedConfig.sampling || (
+            isCharacterLiteMode
+                ? { temp: 0.16, top_k: 10, top_p: 0.74, penalty_repeat: 1.12 }
+                : (isSuperlightTier
+                    ? { temp: 0.1, top_k: 1, top_p: 0.5, penalty_repeat: 1.0 }
+                    : (isLightTierEffective
+                        ? { temp: 0.18, top_k: 12, top_p: 0.78, penalty_repeat: 1.12 }
+                        : { temp: 0.42, top_k: 32, top_p: 0.88, penalty_repeat: 1.06 }))
+        );
+
+        let renderedText = "";
+        const stream = await localEngine.generateChat(messages, {
+            useCache: !(isLightTierEffective || isCharacterLiteMode),
+            nPredict: maxTokens,
+            sampling
+        });
+
+        for await (const chunk of stream) {
+            if (stopSignal) {
+                if (typeof localEngine.interruptGenerate === "function") {
+                    try {
+                        localEngine.interruptGenerate();
+                    } catch (error) {}
+                }
+                break;
+            }
+
+            const rawText = String(getSimpleLocalChunkText(chunk) || "").replace(/\uFFFD+/g, "").replace(/\r\n/g, "\n");
+            if (!rawText) continue;
+
+            const nextText = renderedText
+                ? (rawText.startsWith(renderedText)
+                    ? rawText
+                    : renderedText + trimSimpleLocalOverlap(renderedText, rawText))
+                : rawText;
+
+            if (!nextText || nextText === renderedText) continue;
+            renderedText = nextText;
+            callback(renderedText, { replace: true, isStreaming: true });
+        }
+
+        renderedText = String(renderedText || "").trim();
+        if (renderedText) return renderedText;
+
+        const fallbackText = isCharacterChat ? getCharacterRecoveryText(outputLocale) : emptyResponseText;
+        callback(fallbackText, { replace: true, isStreaming: false });
+        return fallbackText;
+    }
+
     startDownload = window.startDownload = async function () {
         if (startDownloadPromise) {
             return startDownloadPromise;
@@ -890,13 +1054,12 @@
                 }
 
                 engine = await createEngine("compat");
-                const targetSeqLen = Math.min(
-                    Math.max(
-                        speedConfig && speedConfig.maxSeqLen ? Number(speedConfig.maxSeqLen) : 256,
-                        128
-                    ),
-                    2048
+                const requestedSeqLen = Math.max(
+                    Number(window.ISAI_LOCAL_MAX_CONTEXT || 0),
+                    Number(speedConfig && speedConfig.maxSeqLen ? speedConfig.maxSeqLen : 0),
+                    4096
                 );
+                const targetSeqLen = Math.min(Math.max(requestedSeqLen, 512), 8192);
                 const baseLoadOptions = {
                     speedPreset: speedConfig && speedConfig.enginePreset ? speedConfig.enginePreset : "turbo",
                     maxSeqLen: targetSeqLen,
@@ -983,6 +1146,8 @@
     };
 
     runLocalInference = window.runLocalInference = async function (promptArr, callback) {
+        return runSimpleLocalInference(promptArr, callback);
+
         if (isLocalActive && !isModelLoaded) {
             await startDownload();
         }
@@ -2087,4 +2252,3 @@
         }, 0);
     });
 })();
-

@@ -345,70 +345,6 @@
         window.closeGitHubConnectModal = closeGitHubConnectModal;
         window.saveGitHubSettings = saveGitHubSettings;
         window.publishCodeToGitHub = publishCodeToGitHub;
-        const BOARD_RAIL_USAGE_STORAGE_KEY = 'ISAI_BOARD_RAIL_USAGE_V1';
-
-        function getBoardRailUsageMap() {
-            try {
-                const raw = localStorage.getItem(BOARD_RAIL_USAGE_STORAGE_KEY);
-                const parsed = raw ? JSON.parse(raw) : {};
-                return parsed && typeof parsed === 'object' ? parsed : {};
-            } catch (error) {
-                return {};
-            }
-        }
-        function saveBoardRailUsageMap(map) {
-            try {
-                localStorage.setItem(BOARD_RAIL_USAGE_STORAGE_KEY, JSON.stringify(map || {}));
-            } catch (error) {}
-        }
-        function getBoardRailItemKey(element) {
-            if (!element) return '';
-            const tab = String(element.dataset.boardTab || '').trim();
-            if (tab) return `tab:${tab}`;
-            const href = String(element.getAttribute('href') || '').trim();
-            if (href) return `href:${href}`;
-            const icon = String(element.innerHTML || '').trim();
-            return icon ? `html:${icon}` : '';
-        }
-        function applyBoardRailUsageOrdering() {
-            const rail = document.getElementById('board-right-rail-scroll');
-            if (!rail) return;
-            const usageMap = getBoardRailUsageMap();
-            const items = Array.from(rail.querySelectorAll(':scope > .board-rail-btn'));
-            items.forEach((item, index) => {
-                if (!item.dataset.railOrderIndex) item.dataset.railOrderIndex = String(index);
-            });
-            items
-                .sort((a, b) => {
-                    const aKey = getBoardRailItemKey(a);
-                    const bKey = getBoardRailItemKey(b);
-                    const aCount = Number(usageMap[aKey] || 0);
-                    const bCount = Number(usageMap[bKey] || 0);
-                    if (aCount !== bCount) return bCount - aCount;
-                    return Number(a.dataset.railOrderIndex || 0) - Number(b.dataset.railOrderIndex || 0);
-                })
-                .forEach((item) => rail.appendChild(item));
-        }
-        function bumpBoardRailUsage(element) {
-            const key = getBoardRailItemKey(element);
-            if (!key) return;
-            const usageMap = getBoardRailUsageMap();
-            usageMap[key] = Number(usageMap[key] || 0) + 1;
-            saveBoardRailUsageMap(usageMap);
-            applyBoardRailUsageOrdering();
-        }
-        function installBoardRailUsageOrdering() {
-            const rail = document.getElementById('board-right-rail-scroll');
-            if (!rail || rail.dataset.usageOrderingBound === 'true') return;
-            rail.dataset.usageOrderingBound = 'true';
-            applyBoardRailUsageOrdering();
-            rail.addEventListener('click', function (event) {
-                const button = event.target && event.target.closest ? event.target.closest('.board-rail-btn') : null;
-                if (!button || !rail.contains(button)) return;
-                bumpBoardRailUsage(button);
-            });
-        }
-
         function setBoardRailActive(tab) {
             document.querySelectorAll('#board-right-rail [data-board-tab]').forEach((button) => {
                 button.classList.toggle('active', button.dataset.boardTab === tab);
@@ -461,7 +397,6 @@
             }
             __handleChatFullscreenChange();
             setBoardRailActive('news');
-            installBoardRailUsageOrdering();
         }
 
         let selectedMode = 'chat';

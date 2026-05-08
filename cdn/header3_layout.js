@@ -378,7 +378,7 @@ function __applyMobileChatRailSafety() {
     if (promptInput) {
         promptInput.style.setProperty('width', '100%', 'important');
         promptInput.style.setProperty('max-width', '100%', 'important');
-        promptInput.style.setProperty('padding', '6px 0 0 56px', 'important');
+        promptInput.style.setProperty('padding', '6px 0 0 0', 'important');
         promptInput.style.setProperty('padding-right', '0', 'important');
     }
     if (topZone) {

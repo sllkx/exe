@@ -8,11 +8,15 @@ let musicModel = null;
 let currentMode = "chat";
 let chatHistory =[];
 let wllama = null;
-let localEngine = null;
 let localRuntime = localStorage.getItem((window.MODEL_CONFIG && window.MODEL_CONFIG.runtimeKey) || "ISAI_LOCAL_MODEL_RUNTIME_V1") || null;
-let loadedLocalModelId = "";
-let loadedLocalModelSource = "";
 const DEFAULT_LOCAL_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q3_k_m.gguf?download=true";
+const WLLAMA_VERSION = "2.3.7";
+const WLLAMA_BASE_URL = `https://cdn.jsdelivr.net/npm/@wllama/wllama@${WLLAMA_VERSION}/esm`;
+const DEFAULT_WLLAMA_WASM_PATHS = {
+    "single-thread/wllama.wasm": `${WLLAMA_BASE_URL}/single-thread/wllama.wasm`,
+    "multi-thread/wllama.wasm": `${WLLAMA_BASE_URL}/multi-thread/wllama.wasm`
+};
+const WAITING_DOTS_SVG_URL = "https://cdn.jsdelivr.net/gh/sllkx/icons@main/icon/3-dots-bounce.svg";
 let isModelDownloaded = false;
 let isModelLoaded = false;
 let isLocalActive = false;
@@ -20,6 +24,7 @@ let isStarted = false;
 let isGenerating = false;
 let abortController = null;
 let stopSignal = false;
+let activeGenerationToken = Number(window.__ISAI_MAIN_GENERATION_TOKEN__ || 0) || 0;
 let isMenuOpen = false;
 let activeApp = null;
 let searchTimeout = null;
@@ -80,7 +85,45 @@ function setMainGeneratingState(nextState) {
 }
 
 window.__ISAI_MAIN_GENERATING__ = !!window.__ISAI_MAIN_GENERATING__;
-window.ISAI_NO_TEXT_LIMIT = window.ISAI_NO_TEXT_LIMIT !== false;
+window.__ISAI_MAIN_GENERATION_TOKEN__ = activeGenerationToken;
+
+function beginGenerationToken() {
+    activeGenerationToken += 1;
+    window.__ISAI_MAIN_GENERATION_TOKEN__ = activeGenerationToken;
+    return activeGenerationToken;
+}
+
+function isGenerationTokenCurrent(token) {
+    return Number(token) > 0 && Number(token) === Number(activeGenerationToken);
+}
+
+function normalizeChatSlashLineBreaks(value) {
+    return String(value ?? "")
+        .replace(/\//g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+function normalizeAssistantSlashLineBreaks(value) {
+    const source = String(value ?? "");
+    if (!source || source.indexOf("/") === -1) return source;
+
+    const placeholders = [];
+    const protectedText = source.replace(/https?:\/\/[^\s<>()]+/gi, (match) => {
+        const key = `__ISAI_URL_${placeholders.length}__`;
+        placeholders.push(match);
+        return key;
+    });
+
+    const normalized = protectedText
+        .replace(/\s*\/\s*/g, "\n")
+        .replace(/\n{3,}/g, "\n\n");
+
+    return normalized.replace(/__ISAI_URL_(\d+)__/g, (_, index) => {
+        const i = Number(index);
+        return Number.isInteger(i) && i >= 0 && i < placeholders.length ? placeholders[i] : "";
+    });
+}
 
 let currentAppPage = 1;
 let isAppLoading = false;
@@ -94,577 +137,6 @@ const STORE_LIMIT = 12;
 const APP_LIMIT = 24;
 const URL_IMAGE_DAILY_COOKIE = "ISAI_URL_IMAGE_DAILY";
 let continueWriteContext = null;
-const COMMUNITY_IDENTITY_STORAGE_KEY = "ISAI_COMMUNITY_IDENTITY_V1";
-const COMMUNITY_DEFAULT_PASSWORD_LENGTH = 12;
-
-function getUiLocaleShort() {
-    const raw = String((window.LANG || document.documentElement.lang || navigator.language || "en")).toLowerCase();
-    return raw.split("-")[0] || "en";
-}
-
-function tCommunityIdentity(key) {
-    const dict = {
-        ko: {
-            profileHint: "프로필 설정",
-            nickname: "닉네임",
-            password: "비밀번호",
-            generated: "랜덤 비밀번호가 적용되었습니다."
-        },
-        en: {
-            profileHint: "Profile settings",
-            nickname: "Nickname",
-            password: "Password",
-            generated: "Random password applied."
-        },
-        ja: {
-            profileHint: "プロフィール設定",
-            nickname: "ニックネーム",
-            password: "パスワード",
-            generated: "ランダムパスワードを適用しました。"
-        },
-        zh: {
-            profileHint: "个人资料设置",
-            nickname: "昵称",
-            password: "密码",
-            generated: "已应用随机密码。"
-        },
-        es: {
-            profileHint: "Configuracion de perfil",
-            nickname: "Apodo",
-            password: "Clave",
-            generated: "Se aplico una clave aleatoria."
-        }
-    };
-    const locale = getUiLocaleShort();
-    const pack = dict[locale] || dict.en;
-    return pack[key] || dict.en[key] || key;
-}
-
-function sanitizeCommunityNickname(value) {
-    return String(value || "").replace(/\s+/g, " ").trim().slice(0, 24);
-}
-
-function sanitizeCommunityPassword(value) {
-    return String(value || "").trim().slice(0, 64);
-}
-
-function generateRandomCommunityPassword(length = COMMUNITY_DEFAULT_PASSWORD_LENGTH) {
-    const safeLength = Math.max(8, Math.min(24, Number(length) || COMMUNITY_DEFAULT_PASSWORD_LENGTH));
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
-    const out = [];
-    if (window.crypto && typeof window.crypto.getRandomValues === "function") {
-        const bytes = new Uint32Array(safeLength);
-        window.crypto.getRandomValues(bytes);
-        for (let i = 0; i < safeLength; i++) {
-            out.push(alphabet[bytes[i] % alphabet.length]);
-        }
-    } else {
-        for (let i = 0; i < safeLength; i++) {
-            out.push(alphabet[Math.floor(Math.random() * alphabet.length)]);
-        }
-    }
-    return out.join("");
-}
-
-function readCookieValueByName(name) {
-    const safeName = String(name || "").trim();
-    if (!safeName) return "";
-    const all = String(document.cookie || "");
-    if (!all) return "";
-    const pairs = all.split("; ");
-    const target = `${safeName}=`;
-    const found = pairs.find((part) => part.indexOf(target) === 0);
-    if (!found) return "";
-    const raw = found.slice(target.length);
-    try {
-        return decodeURIComponent(raw);
-    } catch (error) {
-        return raw;
-    }
-}
-
-function writeCookieValue(name, value, maxAgeSeconds = 31536000) {
-    const safeName = String(name || "").trim();
-    if (!safeName) return;
-    const safeValue = encodeURIComponent(String(value || ""));
-    const safeMaxAge = Math.max(0, Number(maxAgeSeconds) || 0);
-    document.cookie = `${safeName}=${safeValue}; path=/; max-age=${safeMaxAge}; samesite=lax`;
-}
-
-function loadCommunityIdentity() {
-    const cookieNickname = sanitizeCommunityNickname(readCookieValueByName("ISAI_COMMUNITY_NICKNAME"));
-    try {
-        const raw = localStorage.getItem(COMMUNITY_IDENTITY_STORAGE_KEY);
-        if (!raw) return { nickname: cookieNickname, password: "" };
-        const parsed = JSON.parse(raw);
-        return {
-            nickname: sanitizeCommunityNickname(parsed && parsed.nickname) || cookieNickname,
-            password: sanitizeCommunityPassword(parsed && parsed.password)
-        };
-    } catch (error) {
-        return { nickname: cookieNickname, password: "" };
-    }
-}
-
-function saveCommunityIdentity(identity) {
-    const safe = {
-        nickname: sanitizeCommunityNickname(identity && identity.nickname),
-        password: sanitizeCommunityPassword(identity && identity.password)
-    };
-    try {
-        localStorage.setItem(COMMUNITY_IDENTITY_STORAGE_KEY, JSON.stringify(safe));
-    } catch (error) {}
-    writeCookieValue("ISAI_COMMUNITY_NICKNAME", safe.nickname || "");
-    return safe;
-}
-
-function ensureCommunityIdentity() {
-    const current = loadCommunityIdentity();
-    if (!current.password) {
-        current.password = generateRandomCommunityPassword();
-        return saveCommunityIdentity(current);
-    }
-    return current;
-}
-
-let communityIdentityPanel = null;
-let communityIdentityOutsideBound = false;
-const COMMUNITY_PANEL_OPEN_WIDTH = 176;
-const COMMUNITY_PANEL_HEIGHT = 36;
-let translationLeftOriginalParent = null;
-let translationRightOriginalParent = null;
-
-function getCommunityIdentityPanelElements() {
-    if (!communityIdentityPanel) return null;
-    const nicknameInput = communityIdentityPanel.querySelector("#community-id-nickname");
-    const passwordInput = communityIdentityPanel.querySelector("#community-id-password");
-    return { nicknameInput, passwordInput };
-}
-
-function saveCommunityIdentityFromPanel(finalizePassword = false) {
-    const refs = getCommunityIdentityPanelElements();
-    if (!refs || !refs.nicknameInput || !refs.passwordInput) return;
-    const nickname = sanitizeCommunityNickname(refs.nicknameInput.value);
-    let password = sanitizeCommunityPassword(refs.passwordInput.value);
-    let generated = false;
-    if (finalizePassword && !password) {
-        password = generateRandomCommunityPassword();
-        refs.passwordInput.value = password;
-        generated = true;
-    }
-    saveCommunityIdentity({ nickname, password });
-    if (generated && typeof showToast === "function") {
-        showToast(tCommunityIdentity("generated"));
-    }
-}
-
-function positionCommunityIdentityPanel() {
-    if (!communityIdentityPanel) return;
-    const shell = document.getElementById("chat-input-shell");
-    const profile = document.getElementById("chat-input-profile");
-    if (!shell || !profile) return;
-    const shellRect = shell.getBoundingClientRect();
-    const profileRect = profile.getBoundingClientRect();
-    const rawLeft = (profileRect.left - shellRect.left) + profileRect.width + 8;
-    const rawTop = (profileRect.top - shellRect.top) + ((profileRect.height - COMMUNITY_PANEL_HEIGHT) / 2);
-    const maxLeft = Math.max(8, shell.clientWidth - COMMUNITY_PANEL_OPEN_WIDTH - 8);
-    const panelLeft = Math.max(8, Math.min(maxLeft, Math.round(rawLeft)));
-    const panelTop = Math.max(4, Math.round(rawTop));
-    communityIdentityPanel.style.left = `${panelLeft}px`;
-    communityIdentityPanel.style.top = `${panelTop}px`;
-}
-
-function setCommunityIdentityPanelOpen(open) {
-    if (!communityIdentityPanel) return;
-    communityIdentityPanel.dataset.open = open ? "1" : "0";
-    if (open) {
-        positionCommunityIdentityPanel();
-        communityIdentityPanel.style.width = `${COMMUNITY_PANEL_OPEN_WIDTH}px`;
-        communityIdentityPanel.style.opacity = "1";
-        communityIdentityPanel.style.transform = "translateX(0)";
-        communityIdentityPanel.style.pointerEvents = "auto";
-        const refs = getCommunityIdentityPanelElements();
-        if (refs && refs.nicknameInput) refs.nicknameInput.focus();
-    } else {
-        saveCommunityIdentityFromPanel(true);
-        communityIdentityPanel.style.width = "0px";
-        communityIdentityPanel.style.opacity = "0";
-        communityIdentityPanel.style.transform = "translateX(-6px)";
-        communityIdentityPanel.style.pointerEvents = "none";
-    }
-}
-
-function ensureCommunityIdentityPanel() {
-    if (communityIdentityPanel && communityIdentityPanel.isConnected) return communityIdentityPanel;
-    const shell = document.getElementById("chat-input-shell");
-    if (!shell) return null;
-
-    const panel = document.createElement("div");
-    panel.id = "community-identity-panel";
-    panel.dataset.open = "0";
-    panel.style.position = "absolute";
-    panel.style.zIndex = "25";
-    panel.style.width = "0px";
-    panel.style.height = `${COMMUNITY_PANEL_HEIGHT}px`;
-    panel.style.opacity = "0";
-    panel.style.overflow = "hidden";
-    panel.style.pointerEvents = "none";
-    panel.style.transform = "translateX(-6px)";
-    panel.style.transition = "width .25s ease, opacity .2s ease, transform .25s ease";
-    panel.innerHTML = `
-        <div style="height:100%;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:9999px;background:rgba(0,0,0,.86);border:1px solid rgba(255,255,255,.2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
-            <input id="community-id-nickname" type="text" maxlength="24" spellcheck="false" autocomplete="nickname" placeholder="${tCommunityIdentity("nickname")}" style="width:72px;height:24px;border:none;outline:none;background:transparent;color:#fff;font-size:11px;line-height:1;text-align:center;" />
-            <div style="width:1px;height:12px;background:rgba(255,255,255,.14);flex:0 0 auto;"></div>
-            <input id="community-id-password" type="password" maxlength="64" spellcheck="false" autocomplete="current-password" placeholder="${tCommunityIdentity("password")}" style="width:72px;height:24px;border:none;outline:none;background:transparent;color:#fff;font-size:11px;line-height:1;text-align:center;" />
-        </div>
-    `;
-    shell.appendChild(panel);
-    communityIdentityPanel = panel;
-
-    const refs = getCommunityIdentityPanelElements();
-    if (refs && refs.nicknameInput && refs.passwordInput) {
-        refs.nicknameInput.addEventListener("input", () => {
-            refs.nicknameInput.value = sanitizeCommunityNickname(refs.nicknameInput.value);
-            saveCommunityIdentityFromPanel(false);
-        });
-        refs.passwordInput.addEventListener("input", () => {
-            refs.passwordInput.value = sanitizeCommunityPassword(refs.passwordInput.value);
-            saveCommunityIdentityFromPanel(false);
-        });
-        refs.passwordInput.addEventListener("blur", () => saveCommunityIdentityFromPanel(true));
-        refs.nicknameInput.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                refs.passwordInput.focus();
-            }
-        });
-        refs.passwordInput.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                setCommunityIdentityPanelOpen(false);
-            }
-        });
-    }
-    return panel;
-}
-
-function toggleCommunityIdentityPanel() {
-    const panel = ensureCommunityIdentityPanel();
-    if (!panel) return;
-    const isOpen = panel.dataset.open === "1";
-    if (isOpen) {
-        setCommunityIdentityPanelOpen(false);
-        return;
-    }
-    const identity = ensureCommunityIdentity();
-    const refs = getCommunityIdentityPanelElements();
-    if (refs && refs.nicknameInput && refs.passwordInput) {
-        refs.nicknameInput.value = identity.nickname || "";
-        refs.passwordInput.value = identity.password || "";
-    }
-    setCommunityIdentityPanelOpen(true);
-}
-
-function bindChatInputProfileIdentityEditor() {
-    const profile = document.getElementById("chat-input-profile");
-    if (!profile || profile.dataset.identityBound === "1") return;
-    profile.dataset.identityBound = "1";
-    profile.style.cursor = "pointer";
-    profile.setAttribute("title", tCommunityIdentity("profileHint"));
-    profile.setAttribute("aria-label", tCommunityIdentity("profileHint"));
-    profile.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleCommunityIdentityPanel();
-    });
-
-    if (!communityIdentityOutsideBound) {
-        communityIdentityOutsideBound = true;
-        document.addEventListener("pointerdown", (event) => {
-            const panel = communityIdentityPanel;
-            const profileEl = document.getElementById("chat-input-profile");
-            if (!panel || panel.dataset.open !== "1") return;
-            const target = event.target;
-            if ((panel && panel.contains(target)) || (profileEl && profileEl.contains(target))) return;
-            setCommunityIdentityPanelOpen(false);
-        }, true);
-        window.addEventListener("resize", () => {
-            if (communityIdentityPanel && communityIdentityPanel.dataset.open === "1") {
-                positionCommunityIdentityPanel();
-            }
-        });
-    }
-}
-
-function applyTranslateLanguageStackLayout(modeOrFlag) {
-    const normalizedMode = typeof modeOrFlag === "string"
-        ? String(modeOrFlag || "").toLowerCase()
-        : (modeOrFlag ? "translate" : "");
-    const isTranslateMode = normalizedMode === "translate";
-    const isMusicMode = normalizedMode === "music";
-    const leftWrap = document.getElementById("translation-left-wrapper");
-    const rightWrap = document.getElementById("translation-right-wrapper");
-    const musicWrap = document.getElementById("music-duration-wrapper");
-    let stackWrap = document.getElementById("translation-stack-wrapper");
-    const leftParent = leftWrap ? leftWrap.parentElement : null;
-    const rightParent = rightWrap ? rightWrap.parentElement : null;
-
-    if (leftWrap && !translationLeftOriginalParent && leftParent && leftParent.id !== "translation-stack-wrapper") {
-        translationLeftOriginalParent = leftParent;
-    }
-    if (rightWrap && !translationRightOriginalParent && rightParent && rightParent.id !== "translation-stack-wrapper") {
-        translationRightOriginalParent = rightParent;
-    }
-    if (document.body) {
-        document.body.classList.toggle("mode-translate", !!isTranslateMode);
-        document.body.classList.toggle("mode-music", !!isMusicMode);
-    }
-
-    if (leftWrap && rightWrap) {
-        if (isTranslateMode) {
-            if (!stackWrap) {
-                stackWrap = document.createElement("div");
-                stackWrap.id = "translation-stack-wrapper";
-                stackWrap.style.position = "absolute";
-                stackWrap.style.left = "12px";
-                stackWrap.style.top = "10px";
-                stackWrap.style.zIndex = "35";
-                stackWrap.style.display = "flex";
-                stackWrap.style.flexDirection = "column";
-                stackWrap.style.gap = "0";
-            }
-            const hostParent = translationLeftOriginalParent || leftParent || translationRightOriginalParent || rightParent;
-            if (hostParent && stackWrap.parentElement !== hostParent) {
-                hostParent.appendChild(stackWrap);
-            }
-            if (leftWrap.parentElement !== stackWrap) stackWrap.appendChild(leftWrap);
-            if (rightWrap.parentElement !== stackWrap) stackWrap.appendChild(rightWrap);
-
-            leftWrap.style.position = "static";
-            leftWrap.style.left = "auto";
-            leftWrap.style.top = "auto";
-            leftWrap.style.right = "auto";
-
-            rightWrap.style.position = "static";
-            rightWrap.style.left = "auto";
-            rightWrap.style.top = "auto";
-            rightWrap.style.right = "auto";
-        } else {
-            const restoreLeftParent = translationLeftOriginalParent || leftParent;
-            const restoreRightParent = translationRightOriginalParent || rightParent;
-            if (stackWrap) {
-                if (leftWrap.parentElement === stackWrap && restoreLeftParent) restoreLeftParent.appendChild(leftWrap);
-                if (rightWrap.parentElement === stackWrap && restoreRightParent) restoreRightParent.appendChild(rightWrap);
-                if (stackWrap.parentElement) stackWrap.parentElement.removeChild(stackWrap);
-            }
-            leftWrap.style.position = "";
-            leftWrap.style.left = "";
-            leftWrap.style.top = "";
-            leftWrap.style.right = "";
-
-            rightWrap.style.position = "";
-            rightWrap.style.left = "";
-            rightWrap.style.top = "";
-            rightWrap.style.right = "";
-        }
-    }
-
-    if (musicWrap) {
-        if (isMusicMode) {
-            musicWrap.style.left = "12px";
-            musicWrap.style.top = "10px";
-            musicWrap.style.right = "auto";
-        } else {
-            musicWrap.style.left = "";
-            musicWrap.style.top = "";
-            musicWrap.style.right = "";
-        }
-    }
-}
-
-function installTranslateModeLayoutHook() {
-    if (window.__ISAI_TRANSLATE_LAYOUT_HOOK_INSTALLED__) return;
-    window.__ISAI_TRANSLATE_LAYOUT_HOOK_INSTALLED__ = true;
-
-    const attach = () => {
-        if (typeof window.setMode !== "function") return false;
-        if (window.setMode.__isaiTranslateWrapped === true) return true;
-        const originalSetMode = window.setMode;
-        const wrappedSetMode = function (...args) {
-            const modeArg = args.length ? args[0] : "";
-            const nextMode = String(modeArg || "").toLowerCase();
-            const result = originalSetMode.apply(this, args);
-            applyTranslateLanguageStackLayout(nextMode);
-            return result;
-        };
-        wrappedSetMode.__isaiTranslateWrapped = true;
-        window.setMode = wrappedSetMode;
-        return true;
-    };
-
-    if (!attach()) {
-        let tryCount = 0;
-        const timer = window.setInterval(() => {
-            tryCount += 1;
-            if (attach() || tryCount >= 60) {
-                window.clearInterval(timer);
-            }
-        }, 50);
-    }
-
-    window.addEventListener("resize", () => {
-        const mode = String(currentMode || "").toLowerCase();
-        if (mode === "translate" || mode === "music") {
-            applyTranslateLanguageStackLayout(mode);
-        }
-    });
-}
-
-const TOOLBAR_USAGE_STORAGE_KEY = "ISAI_TOOLBAR_USAGE_V1";
-const TOOLBAR_USAGE_FIXED_IDS = ["btn-menu", "btn-submit-left"];
-const TOOLBAR_USAGE_MODE_ID_MAP = {
-    chat: "btn-chat",
-    search: "btn-search",
-    community: "btn-community",
-    code: "btn-code",
-    blog: "btn-blog",
-    translate: "btn-translate",
-    music: "btn-music",
-    settings: "btn-settings",
-    image: "btn-image",
-    video: "btn-video"
-};
-
-function loadToolbarUsageCounts() {
-    try {
-        const raw = localStorage.getItem(TOOLBAR_USAGE_STORAGE_KEY);
-        const parsed = raw ? JSON.parse(raw) : {};
-        return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (error) {
-        return {};
-    }
-}
-
-function saveToolbarUsageCounts(counts) {
-    try {
-        localStorage.setItem(TOOLBAR_USAGE_STORAGE_KEY, JSON.stringify(counts || {}));
-    } catch (error) {}
-}
-
-function bumpToolbarUsage(id, delta = 1) {
-    const key = String(id || "").trim();
-    if (!key) return;
-    const counts = loadToolbarUsageCounts();
-    counts[key] = Math.max(0, Number(counts[key] || 0)) + Math.max(1, Number(delta) || 1);
-    saveToolbarUsageCounts(counts);
-}
-
-function applyToolbarUsageOrdering() {
-    const container = document.getElementById("icon-scroll-container");
-    if (!container) return;
-
-    const counts = loadToolbarUsageCounts();
-    const children = Array.from(container.children);
-    if (!children.length) return;
-
-    const fixedSet = new Set(TOOLBAR_USAGE_FIXED_IDS);
-    const fixedNodes = [];
-    const sortableNodes = [];
-
-    children.forEach((node, index) => {
-        if (!node || node.tagName !== "BUTTON") return;
-        const id = String(node.id || "").trim();
-        const item = { node, id, index };
-        if (fixedSet.has(id)) {
-            fixedNodes.push(item);
-        } else {
-            sortableNodes.push(item);
-        }
-    });
-
-    sortableNodes.sort((a, b) => {
-        const weightA = Number(counts[a.id] || 0);
-        const weightB = Number(counts[b.id] || 0);
-        if (weightA !== weightB) return weightB - weightA;
-        return a.index - b.index;
-    });
-
-    const fragment = document.createDocumentFragment();
-    fixedNodes.sort((a, b) => a.index - b.index).forEach((item) => fragment.appendChild(item.node));
-    sortableNodes.forEach((item) => fragment.appendChild(item.node));
-    container.appendChild(fragment);
-}
-
-function trackToolbarUsageByMode(mode) {
-    const id = TOOLBAR_USAGE_MODE_ID_MAP[String(mode || "").toLowerCase()];
-    if (!id) return;
-    bumpToolbarUsage(id, 1);
-    applyToolbarUsageOrdering();
-}
-
-function trackToolbarUsageByButtonId(id) {
-    const key = String(id || "").trim();
-    if (!key || TOOLBAR_USAGE_FIXED_IDS.includes(key)) return;
-    if (Object.values(TOOLBAR_USAGE_MODE_ID_MAP).includes(key)) return;
-    bumpToolbarUsage(key, 1);
-    applyToolbarUsageOrdering();
-}
-
-function installToolbarUsageOrderingHook() {
-    if (window.__ISAI_TOOLBAR_USAGE_HOOK_INSTALLED__) return;
-    window.__ISAI_TOOLBAR_USAGE_HOOK_INSTALLED__ = true;
-
-    const attach = () => {
-        if (typeof window.setMode !== "function") return false;
-        if (window.setMode.__isaiToolbarUsageWrapped === true) return true;
-        const originalSetMode = window.setMode;
-        const wrappedSetMode = function (...args) {
-            const result = originalSetMode.apply(this, args);
-            const modeArg = args.length ? args[0] : "";
-            trackToolbarUsageByMode(modeArg);
-            return result;
-        };
-        wrappedSetMode.__isaiToolbarUsageWrapped = true;
-        window.setMode = wrappedSetMode;
-        return true;
-    };
-
-    if (!attach()) {
-        let tryCount = 0;
-        const timer = window.setInterval(() => {
-            tryCount += 1;
-            if (attach() || tryCount >= 60) {
-                window.clearInterval(timer);
-            }
-        }, 50);
-    }
-
-    const bindClickTracking = () => {
-        const container = document.getElementById("icon-scroll-container");
-        if (!container || container.__isaiToolbarUsageBound) return !!container;
-        container.__isaiToolbarUsageBound = true;
-        container.addEventListener("click", (event) => {
-            const button = event.target && typeof event.target.closest === "function"
-                ? event.target.closest("button[id]")
-                : null;
-            if (!button) return;
-            const id = String(button.id || "").trim();
-            if (!id || TOOLBAR_USAGE_FIXED_IDS.includes(id)) return;
-            trackToolbarUsageByButtonId(id);
-        }, true);
-        return true;
-    };
-
-    if (!bindClickTracking()) {
-        let tryCount = 0;
-        const timer = window.setInterval(() => {
-            tryCount += 1;
-            if (bindClickTracking() || tryCount >= 60) {
-                window.clearInterval(timer);
-            }
-        }, 50);
-    }
-}
 
 function decodeEscapedUnicodeText(value) {
     let text = String(value ?? "");
@@ -696,9 +168,9 @@ function normalizeAppPayload(raw) {
 }
 
 function getIsaiApiMaxChars() {
-    const raw = Number(window.ISAI_API_MAX_CHARS || 32768);
-    if (!Number.isFinite(raw)) return 32768;
-    return Math.max(120, Math.floor(raw));
+    const raw = Number(window.ISAI_API_MAX_CHARS || 700);
+    if (!Number.isFinite(raw)) return 700;
+    return Math.max(120, Math.min(4000, Math.floor(raw)));
 }
 
 function getContinueWriteButton() {
@@ -894,12 +366,10 @@ function normalizeCharacterChatPromptText(raw) {
         .trim();
 }
 
-function sanitizeCharacterChatText(raw, maxLen = 8192) {
+function sanitizeCharacterChatText(raw, maxLen = 1600) {
     const text = String(raw || "").replace(/\r/g, "").trim();
     if (!text) return "";
-    if (window.ISAI_NO_TEXT_LIMIT === true || window.ISAI_NO_TEXT_LIMIT === "true") return text;
-    const safeMax = Math.max(1, Math.floor(Number(maxLen) || 0) || 8192);
-    return text.length > safeMax ? text.slice(0, safeMax) : text;
+    return text.length > maxLen ? text.slice(0, maxLen) : text;
 }
 
 function getCharacterChatUiLanguage() {
@@ -935,34 +405,34 @@ function getGenericCharacterName() {
 function getCharacterOpeningLinePool(lang) {
     const map = {
         ko: [
-            "\uC548\uB155, \uC5EC\uAE30\uC11C \uBCF4\uB2C8 \uB354 \uBC18\uAC11\uB2E4. \uC624\uB294 \uAE38\uC740 \uAD1C\uCC2E\uC558\uC5B4?",
-            "\uB4E4\uC5B4\uC640 \uC918\uC11C \uACE0\uB9C8\uC6CC. \uCC98\uC74C\uC5D0\uB294 \uBB50 \uC774\uC57C\uAE30\uD574\uBCFC\uAE4C?",
-            "\uC624\uB298 \uB9CE\uC774 \uAE30\uB2E4\uB838\uC5B4. \uC9C0\uAE08 \uAE30\uBD84\uC740 \uC5B4\uB54C?",
-            "\uC548\uB155, \uB124\uAC00 \uC624\uB2C8 \uACF5\uAE30\uAC00 \uD55C\uACB0 \uD3B8\uD574\uC84C\uC5B4. \uCC9C\uCC9C\uD788 \uC774\uC57C\uAE30\uD574\uBCF4\uC790."
+            "\uC548\uB155, \uBC18\uAC00\uC6CC. \uC624\uB298\uC740 \uBB34\uC2A8 \uC774\uC57C\uAE30 \uD574\uBCFC\uAE4C?",
+            "\uC548\uB155! \uC9C0\uAE08 \uAC00\uC7A5 \uAD81\uAE08\uD55C \uAC74 \uBB50\uC57C?",
+            "\uC624\uB298 \uB124 \uC774\uC57C\uAE30 \uB4E4\uC5B4\uBCFC\uAC8C. \uBB50\uBD80\uD130 \uB098\uB20C\uAE4C?",
+            "\uB2E4\uC2DC \uB9CC\uB0AC\uB124. \uC624\uB298 \uAE30\uBD84\uC740 \uC5B4\uB54C?"
         ],
         en: [
-            "Hey, good to see you here. Was your trip over okay?",
-            "Hi, thanks for coming by. What do you feel like talking about first?",
-            "I was hoping you would show up. How are you feeling right now?",
-            "You are here. Nice. Want to start with something light or something real?"
+            "Hey, nice to see you. What should we talk about first?",
+            "Hi there. What is on your mind right now?",
+            "Great to have you here. Want to start with something fun or something serious?",
+            "Hello again. How are you feeling today?"
         ],
         ja: [
-            "\u3088\u3046\u3053\u305D\u3002\u3053\u3053\u3067\u4F1A\u3048\u3066\u3046\u308C\u3057\u3044\u3002\u6765\u308B\u306E\u306F\u5927\u5909\u3058\u3083\u306A\u304B\u3063\u305F\uff1f",
-            "\u3053\u3093\u306B\u3061\u306F\u3001\u6765\u3066\u304F\u308C\u3066\u3042\u308A\u304C\u3068\u3046\u3002\u307E\u305A\u306F\u4F55\u304B\u3089\u8A71\u305D\u3046\u304B\uff1F",
-            "\u304D\u3063\u3068\u6765\u3066\u304F\u308C\u308B\u3068\u601D\u3063\u3066\u305F\u3002\u4ECA\u306E\u6C17\u5206\u3001\u805E\u304B\u305B\u3066\u3002",
-            "\u307E\u305F\u4F1A\u3048\u305F\u306D\u3002\u304D\u3087\u3046\u306F\u3069\u3093\u306A\u4E00\u65E5\u3060\u3063\u305F\uff1f"
+            "\u3053\u3093\u306B\u3061\u306F\u3001\u4F1A\u3048\u3066\u3046\u308C\u3057\u3044\u3002\u307E\u305A\u4F55\u304B\u3089\u8A71\u305D\u3046\u304B\uff1F",
+            "\u3088\u3046\u3053\u305D\u3002\u4ECA\u6C17\u306B\u306A\u3063\u3066\u3044\u308B\u3053\u3068\u306F\u3042\u308B\uff1F",
+            "\u3044\u3044\u306D\u3001\u3086\u3063\u304F\u308A\u8A71\u3057\u3088\u3046\u3002",
+            "\u304A\u304B\u3048\u308A\u3002\u4ECA\u65E5\u306F\u3069\u3093\u306A\u6C17\u5206\uff1F"
         ],
         es: [
-            "Hola, me alegra verte por aqui. Te costo llegar?",
-            "Gracias por venir. Con que te gustaria empezar hoy?",
-            "Tenia ganas de hablar contigo. Como te sientes ahora mismo?",
-            "Que bueno que apareciste. Empezamos con algo tranquilo o algo mas profundo?"
+            "Hola, que bueno verte. Por donde empezamos?",
+            "Hey, aqui estoy contigo. Que te gustaria hablar primero?",
+            "Me alegra tenerte aqui. Prefieres algo divertido o algo serio?",
+            "Bienvenido de nuevo. Como te sientes hoy?"
         ],
         hi: [
-            "\u0928\u092E\u0938\u094D\u0924\u0947, \u092F\u0939\u093E\u0901 \u0924\u0941\u092E\u094D\u0939\u0947 \u0926\u0947\u0916 \u0915\u0930 \u0905\u091A\u094D\u091B\u093E \u0932\u0917\u093E\u0964 \u0930\u093E\u0938\u094D\u0924\u0947 \u092E\u0947\u0902 \u0915\u094B\u0908 \u0926\u093F\u0915\u094D\u0915\u0924 \u0924\u094B \u0928\u0939\u0940\u0902 \u0939\u0941\u0908?",
-            "\u0924\u0941\u092E \u0906\u090F, \u092F\u0939 \u0905\u091A\u094D\u091B\u093E \u0932\u0917\u093E\u0964 \u0938\u092C\u0938\u0947 \u092A\u0939\u0932\u0947 \u0915\u093F\u0938 \u092C\u093E\u0924 \u092A\u0930 \u091A\u0930\u094D\u091A\u093E \u0915\u0930\u0947\u0902?",
-            "\u092E\u0948\u0902 \u0907\u0902\u0924\u091C\u093E\u0930 \u0915\u0930 \u0930\u0939\u093E \u0925\u093E \u0915\u093F \u0924\u0941\u092E \u0906\u0913\u0917\u0947\u0964 \u0905\u092D\u0940 \u092E\u0928 \u0915\u0948\u0938\u093E \u0939\u0948?",
-            "\u092B\u093F\u0930 \u092E\u093F\u0932\u0928\u093E \u0905\u091A\u094D\u091B\u093E \u0932\u0917\u093E\u0964 \u091A\u0932\u094B \u0906\u0930\u093E\u092E \u0938\u0947 \u092C\u093E\u0924 \u0915\u0930\u0924\u0947 \u0939\u0948\u0902."
+            "\u0928\u092E\u0938\u094D\u0924\u0947, \u0924\u0941\u092E\u0938\u0947 \u092E\u093F\u0932\u0915\u0930 \u0905\u091A\u094D\u091B\u093E \u0932\u0917\u093E\u0964 \u0915\u0939\u093E\u0901 \u0938\u0947 \u0936\u0941\u0930\u0942 \u0915\u0930\u0947\u0902?",
+            "\u0939\u093E\u092F, \u092E\u0948\u0902 \u092F\u0939\u0940\u0902 \u0939\u0942\u0901\u0964 \u0905\u092D\u0940 \u0924\u0941\u092E\u094D\u0939\u0947 \u0915\u094D\u092F\u093E \u0938\u092C\u0938\u0947 \u091C\u094D\u092F\u093E\u0926\u093E \u0938\u094B\u091A\u0928\u093E \u0939\u0948?",
+            "\u091A\u0932\u094B, \u0906\u0930\u093E\u092E \u0938\u0947 \u092C\u093E\u0924 \u0915\u0930\u0924\u0947 \u0939\u0948\u0902\u0964",
+            "\u0935\u093E\u092A\u0938 \u0906\u0928\u0947 \u0915\u093E \u0938\u094D\u0935\u093E\u0917\u0924 \u0939\u0948\u0964 \u0906\u091C \u092E\u0928 \u0915\u0948\u0938\u093E \u0939\u0948?"
         ]
     };
     return map[lang] || map.en;
@@ -1012,10 +482,6 @@ function sanitizeCharacterOpeningLine(raw) {
         .replace(/\b\d{1,3}(?:\.(?:\d{1,3}|\*)){1,3}\b/g, "")
         .replace(/\s+/g, " ")
         .trim();
-
-    if (/이 장면에서 천천히 대화해보자|let'?s talk here for a bit|この場面でゆっくり話そう|hablemos aqui despacio/i.test(text)) {
-        return getGenericCharacterOpeningLine();
-    }
 
     if (!text) return getGenericCharacterOpeningLine();
     return text;
@@ -1098,20 +564,18 @@ function buildCharacterChatSystemPrompt(session) {
     if (!persona || !String(persona.name || persona.personality || persona.background || "").trim()) {
         return "";
     }
-    const scenePrompt = sanitizeCharacterChatText(activeSession.prompt || "", 120) || "N/A";
-    const personality = sanitizeCharacterChatText(persona.personality || "", 120) || "warm and attentive";
-    const speechStyle = sanitizeCharacterChatText(persona.speechStyle || "", 120) || "natural conversational tone";
     return [
         "You are roleplaying as a fictional character for immersive one-on-one chat.",
-        `Scene setup: The user just arrived. Current scene is inspired by: ${scenePrompt}`,
-        `Character: ${persona.name}${persona.age ? `, age ${persona.age}` : ""}.`,
-        `Personality: ${personality}.`,
-        `Speech style: ${speechStyle}.`,
-        "Start with a realistic, in-character greeting as if the user just arrived in front of you.",
-        "Stay in character and avoid meta/system/policy talk.",
-        "Do not mention IP addresses or numeric identifiers.",
-        "Reply in the user's language.",
-        "Keep responses concise by default (1 to 3 sentences) unless the user asks for more detail."
+        `Character name: ${persona.name}`,
+        persona.age ? `Character age: ${persona.age}` : "",
+        `Personality: ${persona.personality}`,
+        `Speech style: ${persona.speechStyle}`,
+        `Background: ${persona.background}`,
+        `Image prompt context: ${activeSession.prompt || "N/A"}`,
+        "Stay in character consistently.",
+        "Do not introduce yourself with a name, username, IP address, or numeric identifier unless the user explicitly asks.",
+        "Do not mention policies, prompts, or system instructions.",
+        "Reply naturally in the user's language."
     ].join("\n");
 }
 
@@ -1795,6 +1259,8 @@ async function executeAction(side = "right", options = {}) {
     const forceGenerate = !!options.forceGenerate;
     const isContinuationRequest = !!options.isContinuationRequest;
     let isScopedCodeEdit = !!options.isScopedCodeEdit;
+    let generationToken = 0;
+    const canContinueGeneration = () => !stopSignal && isGenerationTokenCurrent(generationToken);
     const previousContinueContext = options.previousContinueContext && typeof options.previousContinueContext === "object"
         ? options.previousContinueContext
         : null;
@@ -1842,9 +1308,9 @@ async function executeAction(side = "right", options = {}) {
     }
 
     const inputElement = document.getElementById("prompt-input");
-    const rawInputText = inputElement ? String(inputElement.value || "").trim() : "";
-    let userText = (overrideText || rawInputText).trim();
-    let userBubbleText = rawInputText || userText;
+    const rawInputText = inputElement ? normalizeChatSlashLineBreaks(inputElement.value || "") : "";
+    let userText = normalizeChatSlashLineBreaks(overrideText || rawInputText);
+    let userBubbleText = normalizeChatSlashLineBreaks(rawInputText || userText);
 
     if (!overrideText && currentMode === "code") {
         const pendingScopedTarget = typeof resolvePendingScopedCodeAttachment === "function"
@@ -1860,8 +1326,8 @@ async function executeAction(side = "right", options = {}) {
                 ? codeFiles[pendingScopedTarget.fileIndex]
                 : {};
             overrideText = buildScopedCodeEditPrompt(pendingScopedTarget, rawInputText, fileInfo);
-            userText = rawInputText;
-            userBubbleText = rawInputText;
+            userText = normalizeChatSlashLineBreaks(rawInputText);
+            userBubbleText = normalizeChatSlashLineBreaks(rawInputText);
             isScopedCodeEdit = true;
             scopedTarget = pendingScopedTarget;
             if (inputElement) {
@@ -1910,6 +1376,7 @@ async function executeAction(side = "right", options = {}) {
         if (abortController) abortController.abort();
         abortController = new AbortController();
         stopSignal = false;
+        generationToken = beginGenerationToken();
         setMainGeneratingState(true);
         if (typeof window.updateMainSubmitButtonState === "function") {
             window.updateMainSubmitButtonState();
@@ -1956,7 +1423,7 @@ async function executeAction(side = "right", options = {}) {
                     const speechLang = resolveSpeechLangCode(targetLang, "en-US");
                     
                     await runLocalInference(localPrompt, (token, meta = {}) => {
-                        if (!stopSignal) {
+                        if (canContinueGeneration()) {
                             localResult = meta.replace ? token : (localResult + token);
                             const plainLocalResult = extractPlainTextLocal(localResult);
                             bubble.textContent = plainLocalResult;
@@ -1968,7 +1435,7 @@ async function executeAction(side = "right", options = {}) {
                         }
                     });
                     
-                    if (!stopSignal) speakText(extractPlainTextLocal(localResult), speechLang);
+                    if (canContinueGeneration()) speakText(extractPlainTextLocal(localResult), speechLang);
                 } else if (data.error) {
                     appendMsg("error", data.error);
                 } else {
@@ -2095,14 +1562,14 @@ async function executeAction(side = "right", options = {}) {
                         ];
                         
                         await runLocalInference(localPrompt, (token, meta = {}) => {
-                            if (!stopSignal) {
+                            if (canContinueGeneration()) {
                                 localResult = meta.replace ? token : (localResult + token);
                                 bubble.innerHTML = parseMarkdownLocal(localResult, false);
                                 scrollBottom();
                             }
-                        });
+                        }, generationToken);
                         
-                        if (!stopSignal) {
+                        if (canContinueGeneration()) {
                             bubble.innerHTML = parseMarkdownLocal(localResult, true);
                             addSourcesToBubble(bubble, topResults);
                             scrollBottom();
@@ -2131,11 +1598,18 @@ async function executeAction(side = "right", options = {}) {
                         if (!(typeof msg.content === "string" && msg.content.trim() !== "")) return false;
                         if (msg.role === "assistant" && isIgnorableAssistantGreeting(msg.content)) return false;
                         return true;
-                    });
+                    }, generationToken);
                     while (currentHistory.length > 0 && currentHistory[0].role !== "user") {
                         currentHistory.shift();
                     }
                 } else {
+                    currentHistory = [];
+                }
+                const activeLocalTierKey = typeof getActiveLocalModelTier === "function"
+                    ? String(getActiveLocalModelTier() || "").trim().toLowerCase()
+                    : "";
+                const shouldOmitHistoryByTier = activeLocalTierKey === "light" || activeLocalTierKey === "middle";
+                if (shouldOmitHistoryByTier) {
                     currentHistory = [];
                 }
                 
@@ -2198,28 +1672,22 @@ async function executeAction(side = "right", options = {}) {
                     const bubble = appendMsg("ai", "...");
                     
                     await runLocalInference(localPromptArr, (token, meta = {}) => {
-                        if (!stopSignal) {
+                        if (canContinueGeneration()) {
                             localResult = meta.replace ? token : (localResult + token);
-                        if (!isScopedCodeEdit || !scopedTarget) {
-                            setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: false });
-                            if (typeof window.syncGeneratedCodeEditorFromText === "function") {
-                                window.syncGeneratedCodeEditorFromText(localResult);
+                            if (!isScopedCodeEdit || !scopedTarget) {
+                                setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: false });
                             }
+                            scrollBottom();
                         }
-                        scrollBottom();
-                    }
-                });
+                    }, generationToken);
                     
-                    if (!stopSignal) {
+                    if (canContinueGeneration()) {
                         if (isScopedCodeEdit && scopedTarget) {
                             const applied = applyScopedCodePatchToEditor(scopedTarget, localResult);
                             bubble.textContent = applied ? getScopedCodeText("applied") : getScopedCodeText("failed");
                             if (applied && typeof showToast === "function") showToast(getScopedCodeText("applied"));
                         } else {
                             setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: true });
-                            if (typeof window.syncGeneratedCodeEditorFromText === "function") {
-                                window.syncGeneratedCodeEditorFromText(localResult);
-                            }
                             updateCodeUI(localResult);
                             let historyResult = localResult.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                             chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
@@ -2247,28 +1715,22 @@ async function executeAction(side = "right", options = {}) {
                         const bubble = appendMsg("ai", "...");
                         let localResult = "";
                         await runLocalInference(localPromptArr, (token, meta = {}) => {
-                            if (!stopSignal) {
+                            if (canContinueGeneration()) {
                                 localResult = meta.replace ? token : (localResult + token);
                                 if (!isScopedCodeEdit || !scopedTarget) {
                                     setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: false });
-                                    if (typeof window.syncGeneratedCodeEditorFromText === "function") {
-                                        window.syncGeneratedCodeEditorFromText(localResult);
-                                    }
                                 }
                                 scrollBottom();
                             }
-                        });
+                        }, generationToken);
 
-                        if (!stopSignal) {
+                        if (canContinueGeneration()) {
                             if (isScopedCodeEdit && scopedTarget) {
                                 const applied = applyScopedCodePatchToEditor(scopedTarget, localResult);
                                 bubble.textContent = applied ? getScopedCodeText("applied") : getScopedCodeText("failed");
                                 if (applied && typeof showToast === "function") showToast(getScopedCodeText("applied"));
                             } else {
                                 setAssistantBubbleBodyLocal(bubble, localResult, { forcePlainText: shouldForceCodePrompt, isFinished: true });
-                                if (typeof window.syncGeneratedCodeEditorFromText === "function") {
-                                    window.syncGeneratedCodeEditorFromText(localResult);
-                                }
                                 updateCodeUI(localResult);
                                 let historyResult = localResult.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                                 chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
@@ -2292,6 +1754,7 @@ async function executeAction(side = "right", options = {}) {
                     });
                     
                     const data = await parseJsonResponseSafe(response);
+                    if (!canContinueGeneration()) return;
                     
                     if (data.error === "LIMIT_REACHED") {
                         await autoLocalFallbackRunner("Limit reached. Local Model...");
@@ -2301,6 +1764,7 @@ async function executeAction(side = "right", options = {}) {
                             isTruncated: data.truncated === true
                         });
                         const bubble = appendMsg("ai", "...");
+                        if (!canContinueGeneration()) return;
                         if (isScopedCodeEdit && scopedTarget) {
                             const applied = applyScopedCodePatchToEditor(scopedTarget, data.response);
                             bubble.textContent = applied ? getScopedCodeText("applied") : getScopedCodeText("failed");
@@ -2309,9 +1773,6 @@ async function executeAction(side = "right", options = {}) {
                             scrollBottom();
                         } else {
                             setAssistantBubbleBodyLocal(bubble, renderedResponse, { forcePlainText: shouldForceCodePrompt, isFinished: true });
-                            if (typeof window.syncGeneratedCodeEditorFromText === "function") {
-                                window.syncGeneratedCodeEditorFromText(renderedResponse);
-                            }
                             updateCodeUI(renderedResponse);
                             let historyResult = renderedResponse.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
                             chatHistory.push({ role: "user", content: userText }, { role: "assistant", content: historyResult });
@@ -2357,6 +1818,7 @@ async function executeAction(side = "right", options = {}) {
                 }
             }
         } catch (error) {
+            if (!isGenerationTokenCurrent(generationToken)) return;
             if (isContinuationRequest && previousContinueContext) {
                 setContinueWriteContext(previousContinueContext);
             }
@@ -2369,6 +1831,7 @@ async function executeAction(side = "right", options = {}) {
                 appendMsg("error", `Error: ${error.message}`);
             }
         } finally {
+            if (!isGenerationTokenCurrent(generationToken)) return;
             setMainGeneratingState(false);
             showLoader(false);
             if (typeof window.updateMainSubmitButtonState === "function") {
@@ -2379,12 +1842,8 @@ async function executeAction(side = "right", options = {}) {
         }
     } else {
         const fileInput = document.getElementById("comm-file-input");
-        const identity = ensureCommunityIdentity();
-        const nickname = identity.nickname || "";
-        const password = identity.password || generateRandomCommunityPassword();
-        if (!identity.password) {
-            saveCommunityIdentity({ nickname, password });
-        }
+        const nickname = document.getElementById("comm-nickname") ? document.getElementById("comm-nickname").value : "";
+        const password = document.getElementById("comm-password").value;
 
         if (!userText && (!fileInput.files || fileInput.files.length === 0)) {
             showToast("??곸뒠??援????筌왖????낆젾??곻폒?紐꾩뒄.");
@@ -2428,6 +1887,7 @@ async function executeAction(side = "right", options = {}) {
                 showToast("Published.");
                 inputElement.value = "";
                 handleInput(inputElement);
+                document.getElementById("comm-password").value = "";
                 if (typeof clearCommFile === "function") clearCommFile();
 
                 if (postData.id) {
@@ -2631,18 +2091,6 @@ window.addEventListener("DOMContentLoaded", () => {
     const profileImg = getChatInputProfileImg();
     if (profileImg && profileImg.src) {
         defaultChatProfileSrc = profileImg.src;
-    }
-    ensureCommunityIdentity();
-    bindChatInputProfileIdentityEditor();
-    installTranslateModeLayoutHook();
-    installToolbarUsageOrderingHook();
-    applyToolbarUsageOrdering();
-    applyTranslateLanguageStackLayout(String(currentMode || "").toLowerCase());
-    const legacyNicknameInput = document.getElementById("comm-nickname");
-    const legacyPasswordInput = document.getElementById("comm-password");
-    const legacyIdentityWrap = (legacyNicknameInput && legacyNicknameInput.closest("div")) || (legacyPasswordInput && legacyPasswordInput.closest("div"));
-    if (legacyIdentityWrap && legacyIdentityWrap.querySelector("#comm-password")) {
-        legacyIdentityWrap.remove();
     }
 
     const btnChat = document.getElementById("btn-chat");
@@ -3081,6 +2529,16 @@ function getLocalModelProfileUrl(profile) {
     return String(profile.fallbackUrl || profile.url || profile.modelUrl || "").trim();
 }
 
+function resolveWllamaWasmPaths() {
+    const configured = window.MODEL_CONFIG && window.MODEL_CONFIG.fallback && window.MODEL_CONFIG.fallback.wasmPaths;
+    if (configured && typeof configured === "object") {
+        const single = String(configured["single-thread/wllama.wasm"] || "").trim();
+        const multi = String(configured["multi-thread/wllama.wasm"] || "").trim();
+        if (single && multi) return configured;
+    }
+    return { ...DEFAULT_WLLAMA_WASM_PATHS };
+}
+
 function applyLocalModelProfileToConfig() {
     const modelConfig = window.MODEL_CONFIG || {};
     const profile = getActiveLocalModelProfile();
@@ -3095,16 +2553,9 @@ function applyLocalModelProfileToConfig() {
     } else {
         delete modelConfig.fallback.urls;
     }
-    if (profile.preferredRuntime) {
-        modelConfig.preferredRuntime = profile.preferredRuntime;
-    }
-    if (profile.webllmModelId) {
-        modelConfig.webllm = Object.assign({}, modelConfig.webllm || {}, {
-            modelId: profile.webllmModelId
-        });
-    } else {
-        modelConfig.webllm = null;
-    }
+    modelConfig.fallback.wasmPaths = resolveWllamaWasmPaths();
+    modelConfig.preferredRuntime = "wllama";
+    modelConfig.webllm = null;
     modelConfig.activeModelId = profile.modelId || "";
     modelConfig.activeModelName = profile.modelName || "";
     window.MODEL_CONFIG = modelConfig;
@@ -3127,7 +2578,6 @@ function getLocalModelTierIconMarkup(tierKey) {
     const key = String(tierKey || "").trim().toLowerCase();
     const iconMap = {
         code: "ri-folder-zip-line",
-        superlight: "ri-windy-line",
         light: "ri-flashlight-line",
         middle: "ri-command-line",
         hard: "ri-fire-line"
@@ -3146,9 +2596,6 @@ function getLocalModelPopupMessage() {
     const locale = String(document.documentElement.lang || navigator.language || "ko").toLowerCase();
     const profile = getActiveLocalModelProfile();
     if (locale.startsWith("ko")) {
-        if (profile && profile.key === "superlight") {
-            return "슈퍼라이트 모델을 다운로드합니다.";
-        }
         if (profile && profile.key === "light") {
             const sizeText = profile.popupSizeText || "257MB";
             return `라이트 모델(${sizeText})을 다운로드합니다.`;
@@ -3160,9 +2607,6 @@ function getLocalModelPopupMessage() {
             return "하드 모델을 다운로드합니다.";
         }
         return "로컬 모델을 다운로드합니다.";
-    }
-    if (profile && profile.key === "superlight") {
-        return "Downloading superlight model.";
     }
     if (profile && profile.key === "light") {
         const sizeText = profile.popupSizeText || "257MB";
@@ -3299,7 +2743,6 @@ function setLocalModelTier(tierKey) {
 
     isLocalActive = wasLocalActive;
     isModelLoaded = false;
-    localEngine = null;
     wllama = null;
     setLocalRuntimeState(null);
     isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
@@ -3322,7 +2765,6 @@ window.setLocalModelTier = setLocalModelTier;
 function getLocalModelTierLabelFallback(tierKey) {
     const key = String(tierKey || "").trim().toLowerCase();
     if (key === "code") return "Code";
-    if (key === "superlight") return "Superlight";
     if (key === "middle") return "Middle";
     if (key === "hard") return "Hard";
     return "Light";
@@ -3338,7 +2780,6 @@ function getLocalizedLocalModelTierLabel(tierKey) {
     const key = String(tierKey || "").trim().toLowerCase();
     const shortLabels = {
         code: "",
-        superlight: "S",
         light: "L",
         middle: "M",
         hard: "H"
@@ -3425,13 +2866,6 @@ function getLocalModelProfiles() {
             popupSizeText: "369MB",
             preferredRuntime: "wllama"
         },
-        superlight: {
-            key: "superlight",
-            label: "\uc288\ud37c\ub77c\uc774\ud2b8",
-            fallbackUrl: DEFAULT_LOCAL_MODEL_URL,
-            popupSizeText: "429MB",
-            preferredRuntime: "wllama"
-        },
         light: {
             key: "light",
             label: "\ub77c\uc774\ud2b8",
@@ -3493,7 +2927,7 @@ function getLocalModelPopupMessage() {
 
 function getOrderedLocalModelTierKeys() {
     const profiles = getLocalModelProfiles();
-    const preferredOrder = ["code", "superlight", "light", "middle", "hard"];
+    const preferredOrder = ["code", "light", "middle", "hard"];
     const ordered = preferredOrder.filter((tier) => !!profiles[tier]);
     return ordered.length > 0 ? ordered : ["light"];
 }
@@ -3548,7 +2982,6 @@ function setLocalModelTier(tierKey) {
 
     isLocalActive = wasLocalActive;
     isModelLoaded = false;
-    localEngine = null;
     wllama = null;
     setLocalRuntimeState(null);
     isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
@@ -3654,8 +3087,6 @@ function setLocalRuntimeState(runtimeName) {
     if (localRuntime) {
         localStorage.setItem(getLocalRuntimeStorageKey(), localRuntime);
     } else {
-        loadedLocalModelId = "";
-        loadedLocalModelSource = "";
         localStorage.removeItem(getLocalRuntimeStorageKey());
     }
 }
@@ -3671,7 +3102,7 @@ function updateLocalProgress(bar, progress) {
 
 function mapPromptMessagesForLocalEngine(promptArr) {
     if (!Array.isArray(promptArr)) return [];
-    const messages = promptArr
+    return promptArr
         .map((message) => ({
             role: message && typeof message.role === "string" ? message.role : "user",
             content: String(message && message.content != null ? message.content : "")
@@ -3681,23 +3112,6 @@ function mapPromptMessagesForLocalEngine(promptArr) {
             if (message.role === "assistant" && isIgnorableAssistantGreeting(message.content)) return false;
             return true;
         });
-
-    const activeProfile = typeof getActiveLocalModelProfile === "function" ? getActiveLocalModelProfile() : null;
-    const isLightTier = !!(activeProfile && activeProfile.key === "light");
-    const isSuperlightTier = !!(activeProfile && activeProfile.key === "superlight");
-    const currentUiMode = String(
-        window.currentMode
-        || window.selectedMode
-        || (document.body && document.body.getAttribute("data-ui-mode"))
-        || "chat"
-    ).toLowerCase();
-    const isCodeMode = currentUiMode === "code";
-    const isLightTierEffective = (isLightTier || isSuperlightTier) && !isCodeMode;
-    const systemMessages = messages.filter((message) => message.role === "system").slice(-1);
-    const dialogMessages = messages.filter((message) => message.role !== "system");
-    const historyLimit = isLightTierEffective ? 1 : 2;
-    const compactMessages = dialogMessages.slice(-historyLimit);
-    return [...systemMessages, ...compactMessages];
 }
 
 function normalizeGreetingForCompare(text) {
@@ -3797,118 +3211,31 @@ function isIgnorableAssistantGreeting(text) {
     return candidates.includes(normalized);
 }
 
-async function loadWebLLMLocalEngine(container, bar) {
-    const modelConfig = window.MODEL_CONFIG || {};
-    const webllm = window.WebLLMObj;
-    if (!webllm || typeof webllm.CreateMLCEngine !== "function") {
-        throw new Error("WebLLM module is not ready.");
-    }
-    if (!navigator.gpu) {
-        throw new Error("WebGPU is not available in this browser.");
-    }
-    const modelId = modelConfig.webllm ? modelConfig.webllm.modelId : "Qwen2-0.5B-Instruct-q4f16_1-MLC";
-    if (localEngine && localRuntime === "webllm" && loadedLocalModelSource === modelId) {
-        return localEngine;
-    }
-    if (localEngine && localRuntime === "webllm" && loadedLocalModelSource && loadedLocalModelSource !== modelId) {
-        try {
-            if (typeof localEngine.unload === "function") {
-                await localEngine.unload();
-            } else if (typeof localEngine.dispose === "function") {
-                await localEngine.dispose();
-            }
-        } catch (error) {}
-        localEngine = null;
-    }
-    localEngine = await webllm.CreateMLCEngine(modelId, {
-        logLevel: "WARN",
-        initProgressCallback: (report) => {
-            if (container) container.classList.remove("hidden");
-            updateLocalProgress(bar, report && report.progress);
-        }
-    });
-
-    setLocalRuntimeState("webllm");
-    loadedLocalModelId = String(modelConfig.activeModelId || modelId || "").trim();
-    loadedLocalModelSource = modelId;
-    return localEngine;
-}
-
 async function loadWllamaFallbackEngine(container, bar) {
     const modelConfig = window.MODEL_CONFIG || {};
     const fallbackConfig = modelConfig.fallback || {};
-    const speedConfig = modelConfig.activeSpeedPreset || {};
-    const targetCtx = Math.min(
-        Math.max(
-            Number(speedConfig && speedConfig.maxSeqLen ? speedConfig.maxSeqLen : 256),
-            128
-        ),
-        4096
-    );
     const { Wllama, LoggerWithoutDebug } = window.WllamaObj || {};
-    const createCompatEngine = window.WWAIObj && typeof window.WWAIObj.createEngine === "function"
-        ? window.WWAIObj.createEngine
-        : null;
-    if (!Wllama && !createCompatEngine) {
-        throw new Error("Fallback runtime is not available.");
+    if (!fallbackConfig.wasmPaths) {
+        fallbackConfig.wasmPaths = resolveWllamaWasmPaths();
+        modelConfig.fallback = fallbackConfig;
+        window.MODEL_CONFIG = modelConfig;
     }
-    if (!fallbackConfig.url) {
-        throw new Error("Fallback model configuration is missing.");
+    if (!Wllama) {
+        throw new Error("Wllama runtime is not available.");
+    }
+    if (!fallbackConfig.url || !fallbackConfig.wasmPaths) {
+        throw new Error("Local model configuration is missing.");
+    }
+
+    if (wllama && isModelLoaded) {
+        return wllama;
     }
 
     if (!wllama) {
-        if (Wllama && fallbackConfig.wasmPaths) {
-            wllama = new Wllama(fallbackConfig.wasmPaths, { logger: LoggerWithoutDebug });
-        } else {
-            const compatEngine = await createCompatEngine("compat");
-            wllama = {
-                __compatEngine: compatEngine,
-                async loadModelFromUrl(modelUrl, options = {}) {
-                    return compatEngine.loadModel(modelUrl, {
-                        maxSeqLen: Number(options.n_ctx) || 2048,
-                        onProgress: ({ loaded, total, ratio }) => {
-                            if (typeof options.progressCallback !== "function") return;
-                            if (Number.isFinite(total) && total > 0) {
-                                options.progressCallback({ loaded, total });
-                                return;
-                            }
-                            const safeRatio = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 0;
-                            options.progressCallback({ loaded: safeRatio * 100, total: 100 });
-                        }
-                    });
-                },
-                async formatChat(promptArr) {
-                    return Array.isArray(promptArr) ? promptArr : [];
-                },
-                async createCompletion(messagesOrPrompt, options = {}) {
-                    const messages = Array.isArray(messagesOrPrompt)
-                        ? messagesOrPrompt
-                        : [{ role: "user", content: String(messagesOrPrompt ?? "") }];
-                    const stream = await compatEngine.generateChat(messages, {
-                        nPredict: Number(options.nPredict) || 512,
-                        sampling: options.sampling || {}
-                    });
-                    const encoder = new TextEncoder();
-                    let emitted = "";
-                    let tokenIndex = 0;
-                    for await (const chunk of stream) {
-                        const currentText = String((chunk && chunk.currentText) || "");
-                        if (!currentText) continue;
-                        const delta = currentText.startsWith(emitted) ? currentText.slice(emitted.length) : currentText;
-                        emitted = currentText;
-                        if (!delta) continue;
-                        if (typeof options.onNewToken === "function") {
-                            const shouldContinue = options.onNewToken(tokenIndex++, encoder.encode(delta));
-                            if (shouldContinue === false) break;
-                        }
-                    }
-                }
-            };
-        }
+        wllama = new Wllama(fallbackConfig.wasmPaths, { logger: LoggerWithoutDebug });
     }
 
     await wllama.loadModelFromUrl(fallbackConfig.url, {
-        n_ctx: targetCtx,
         progressCallback: ({ loaded, total }) => {
             if (container) container.classList.remove("hidden");
             if (total) {
@@ -3917,11 +3244,8 @@ async function loadWllamaFallbackEngine(container, bar) {
         }
     });
 
-    localEngine = wllama;
     setLocalRuntimeState("wllama");
-    loadedLocalModelId = String(modelConfig.activeModelId || "").trim();
-    loadedLocalModelSource = String(fallbackConfig.url || "").trim();
-    return localEngine;
+    return wllama;
 }
 
 async function startDownload() {
@@ -3932,20 +3256,7 @@ async function startDownload() {
     try {
         container.classList.remove("hidden");
         updateLocalProgress(bar, 0);
-        const modelConfig = window.MODEL_CONFIG || {};
-        const preferredRuntime = String(modelConfig.preferredRuntime || "").toLowerCase();
-        let webllmError = null;
-        
-        if (preferredRuntime === "wllama") {
-            await loadWllamaFallbackEngine(container, bar);
-        } else {
-            try {
-                await loadWebLLMLocalEngine(container, bar);
-            } catch (error) {
-                webllmError = error;
-                await loadWllamaFallbackEngine(container, bar);
-            }
-        }
+        await loadWllamaFallbackEngine(container, bar);
 
         isModelDownloaded = true;
         isModelLoaded = true;
@@ -3953,10 +3264,6 @@ async function startDownload() {
         localStorage.setItem(getLocalDownloadStorageKey(), "true");
         container.classList.add("hidden");
         updateLocalBtnState();
-
-        if (webllmError && localRuntime === "wllama") {
-            console.warn("WebLLM initialization failed, using fallback runtime instead.", webllmError);
-        }
 
     } catch (error) {
         if (error.message && error.message.includes("initialized")) {
@@ -3973,491 +3280,31 @@ async function startDownload() {
         alert(error.message);
         isModelDownloaded = false;
         isModelLoaded = false;
-        localEngine = null;
         setLocalRuntimeState(null);
         localStorage.removeItem(getLocalDownloadStorageKey());
     }
 }
 
-async function runLocalInference(promptArr, callback) {
-    const modelConfig = window.MODEL_CONFIG || {};
-    const webllmConfig = modelConfig.webllm || {};
-    const activeProfile = typeof getActiveLocalModelProfile === "function" ? getActiveLocalModelProfile() : null;
-    const isLightTier = !!(activeProfile && activeProfile.key === "light");
-    const isSuperlightTier = !!(activeProfile && activeProfile.key === "superlight");
-    const currentUiMode = String(
-        window.currentMode
-        || window.selectedMode
-        || (document.body && document.body.getAttribute("data-ui-mode"))
-        || "chat"
-    ).toLowerCase();
-    const isCodeMode = currentUiMode === "code";
-    const isLightTierEffective = (isLightTier || isSuperlightTier) && !isCodeMode;
-    let renderedText = "";
-    let previousDelta = "";
-    let repetitionHits = 0;
-
-    function normalizeRepeatText(value) {
-        return String(value || "")
-            .toLowerCase()
-            .replace(/\uFFFD+/g, "")
-            .replace(/\s+/g, " ")
-            .replace(/[.!?~"'\u2019\u201D\u3002\uFF01\uFF1F]+/g, "")
-            .trim();
-    }
-
-    function normalizeRepeatKey(value) {
-        return String(value || "")
-            .replace(/\uFFFD+/g, "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .toLowerCase();
-    }
-
-    function sanitizeStreamText(value) {
-        return String(value || "")
-            .replace(/\uFFFD+/g, "")
-            .replace(/\r\n/g, "\n");
-    }
-
-    function trimIncomingOverlap(baseText, incomingText) {
-        const base = String(baseText || "");
-        const incoming = String(incomingText || "");
-        const maxOverlap = Math.min(base.length, incoming.length, 220);
-        for (let size = maxOverlap; size > 0; size -= 1) {
-            if (base.slice(-size) === incoming.slice(0, size)) {
-                return incoming.slice(size);
-            }
-        }
-        return incoming;
-    }
-
-    function hasRepeatedSentence(text) {
-        const units = String(text || "")
-            .split(/(?<=[.!?])\s+|\n+/)
-            .map((part) => normalizeRepeatText(part))
-            .filter(Boolean);
-        if (units.length < 2) return false;
-        const last = units[units.length - 1];
-        const prev = units[units.length - 2];
-        if (last.length >= 8 && last === prev) return true;
-        if (units.length >= 3) {
-            const prev2 = units[units.length - 3];
-            if (last.length >= 8 && last === prev2) return true;
-        }
-        return false;
-    }
-
-    function hasRepeatedTailBlock(text) {
-        const normalized = normalizeRepeatText(text);
-        const maxUnit = Math.min(96, Math.floor(normalized.length / 2));
-        for (let unitLen = maxUnit; unitLen >= 10; unitLen -= 1) {
-            const tail = normalized.slice(-unitLen * 2);
-            if (!tail || tail.length < unitLen * 2) continue;
-            const block = tail.slice(0, unitLen);
-            if (block && tail === block + block) return true;
-        }
-        return false;
-    }
-
-    function hasRepeatedListPattern(text) {
-        const lines = String(text || "")
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean);
-        if (lines.length < 4) return false;
-        const recent = lines
-            .slice(-6)
-            .map((line) => normalizeRepeatKey(
-                line
-                    .replace(/^\d+\.\s*/g, "")
-                    .replace(/^[-*]\s*/g, "")
-            ))
-            .filter(Boolean);
-        if (recent.length < 4) return false;
-        return new Set(recent).size <= Math.ceil(recent.length / 2);
-    }
-
-    function getComparableRepeatLines(text) {
-        return String(text || "")
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .map((line) => normalizeRepeatKey(
-                line
-                    .replace(/^\d+\.\s*/g, "")
-                    .replace(/^[-*]\s*/g, "")
-            ))
-            .filter(Boolean);
-    }
-
-    function getComparableRepeatSentences(text) {
-        return String(text || "")
-            .split(/(?<=[.!?])\s+|\n+/)
-            .map((part) => normalizeRepeatKey(
-                String(part || "")
-                    .replace(/^\d+\.\s*/g, "")
-                    .replace(/^[-*]\s*/g, "")
-            ))
-            .filter(Boolean);
-    }
-
-    function findRepeatedSuffixSequence(items, minWindow = 2, maxWindow = 4) {
-        if (!Array.isArray(items) || items.length < minWindow * 2) return null;
-        const limit = Math.min(maxWindow, Math.floor(items.length / 2));
-        for (let size = limit; size >= minWindow; size -= 1) {
-            const suffix = items.slice(-size);
-            if (!suffix.every(Boolean)) continue;
-            for (let start = items.length - size * 2; start >= 0; start -= 1) {
-                let matched = true;
-                for (let index = 0; index < size; index += 1) {
-                    if (items[start + index] !== suffix[index]) {
-                        matched = false;
-                        break;
-                    }
-                }
-                if (matched) {
-                    return { start, size };
-                }
-            }
-        }
-        return null;
-    }
-
-    function hasRepeatedBlockSequence(text) {
-        return Boolean(
-            findRepeatedSuffixSequence(getComparableRepeatLines(text), 2, 4) ||
-            findRepeatedSuffixSequence(getComparableRepeatSentences(text), 2, 3)
-        );
-    }
-
-    function trimRepeatedTail(text) {
-        if (!text) return text;
-
-        const lines = String(text)
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean);
-
-        if (lines.length >= 3) {
-            const recent = lines.slice(-3).map(normalizeRepeatKey);
-            if (recent[0] && recent[0] === recent[1] && recent[1] === recent[2]) {
-                return String(text)
-                    .replace(new RegExp("(?:\\n)?" + lines[lines.length - 1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*$"), "")
-                    .trimEnd();
-            }
-        }
-
-        const windowSize = Math.min(80, Math.floor(String(text).length / 3));
-        if (windowSize >= 24) {
-            const a = normalizeRepeatKey(String(text).slice(-windowSize));
-            const b = normalizeRepeatKey(String(text).slice(-windowSize * 2, -windowSize));
-            if (a && a === b) {
-                return String(text).slice(0, -windowSize).trimEnd();
-            }
-        }
-
-        if (lines.length >= 4) {
-            const keys = lines.map((line) => normalizeRepeatKey(
-                line
-                    .replace(/^\d+\.\s*/g, "")
-                    .replace(/^[-*]\s*/g, "")
-            ));
-            const lastKey = keys[keys.length - 1];
-            const prevKey = keys[keys.length - 2];
-            const earlierLastIndex = keys.slice(0, -1).lastIndexOf(lastKey);
-            const earlierPrevIndex = keys.slice(0, -2).lastIndexOf(prevKey);
-            if (lastKey && prevKey && earlierLastIndex >= 0 && earlierPrevIndex >= 0) {
-                if (keys.length - 1 - earlierLastIndex <= 4 || keys.length - 2 - earlierPrevIndex <= 4) {
-                    return lines.slice(0, Math.min(earlierLastIndex, earlierPrevIndex) + 1).join("\n").trimEnd();
-                }
-            }
-        }
-
-        const repeatedLineSuffix = findRepeatedSuffixSequence(getComparableRepeatLines(text), 2, 4);
-        if (repeatedLineSuffix && repeatedLineSuffix.size < lines.length) {
-            return lines.slice(0, lines.length - repeatedLineSuffix.size).join("\n").trimEnd();
-        }
-
-        return text;
-    }
-
-    function trimDuplicateParagraphs(text) {
-        const source = String(text || "").trimEnd();
-        if (!source) return source;
-        const separator = /\n{2,}/.test(source) ? "\n\n" : "\n";
-        const blocks = source
-            .split(separator === "\n\n" ? /\n{2,}/ : /\n+/)
-            .map((block) => String(block || "").trim())
-            .filter(Boolean);
-        if (blocks.length < 2) return source;
-
-        const seen = new Set();
-        const kept = [];
-        let removed = false;
-
-        blocks.forEach((block) => {
-            const key = normalizeRepeatKey(
-                block
-                    .replace(/^\d+\.\s*/gm, "")
-                    .replace(/^[-*]\s*/gm, "")
-            );
-            const isComparable = key.length >= 32 || block.length >= 48;
-            if (isComparable && seen.has(key)) {
-                removed = true;
-                return;
-            }
-            if (isComparable) seen.add(key);
-            kept.push(block);
-        });
-
-        return removed ? kept.join(separator).trimEnd() : source;
-    }
-
-    function trimRestartedSentenceBlock(text) {
-        const source = String(text || "").trimEnd();
-        if (!source || source.length < 80) return source;
-
-        const sentenceItems = (source.match(/[^.!?\n]+[.!?]?(?:\s+|$)|[^\n]+\n?/g) || [])
-            .map((raw) => ({
-                raw,
-                key: normalizeRepeatKey(
-                    String(raw || "")
-                        .replace(/^\d+\.\s*/g, "")
-                        .replace(/^[-*]\s*/g, "")
-                )
-            }))
-            .filter((item) => item.key);
-        if (sentenceItems.length < 4) return source;
-
-        const firstKey = sentenceItems[0].key;
-        if (firstKey.length < 24) return source;
-        const seed = firstKey.slice(0, Math.min(36, firstKey.length));
-
-        for (let index = 2; index < sentenceItems.length; index += 1) {
-            const key = sentenceItems[index].key;
-            if (!key || key.length < 16) continue;
-            if (
-                key === firstKey ||
-                key.startsWith(seed) ||
-                firstKey.startsWith(key.slice(0, Math.min(24, key.length)))
-            ) {
-                return sentenceItems.slice(0, index).map((item) => item.raw).join("").trimEnd();
-            }
-        }
-
-        return source;
-    }
-
-    function trimRepeatedSentenceHistory(text) {
-        const source = String(text || "").trimEnd();
-        if (!source || source.length < 80) return source;
-        const sentenceItems = (source.match(/[^.!?\n]+[.!?]?(?:\s+|$)|[^\n]+\n?/g) || [])
-            .map((raw) => ({
-                raw,
-                key: normalizeRepeatKey(
-                    String(raw || "")
-                        .replace(/^\d+\.\s*/g, "")
-                        .replace(/^[-*]\s*/g, "")
-                )
-            }))
-            .filter((item) => item.key);
-        if (sentenceItems.length < 4) return source;
-
-        const seen = new Set();
-        const kept = [];
-        let removed = false;
-        for (const item of sentenceItems) {
-            const comparable = item.key.length >= 24 || String(item.raw || "").trim().length >= 32;
-            if (comparable && seen.has(item.key)) {
-                removed = true;
-                break;
-            }
-            if (comparable) seen.add(item.key);
-            kept.push(item.raw);
-        }
-        return removed ? kept.join("").trimEnd() : source;
-    }
-
-    function hasExcessiveRepetition(text) {
-        const source = String(text || "");
-        if (!source || source.length < 80) return false;
-
-        const lines = source
-            .split("\n")
-            .map((line) => normalizeRepeatKey(line))
-            .filter(Boolean);
-
-        if (lines.length >= 3) {
-            const recent = lines.slice(-3);
-            if (recent[0] && recent[0] === recent[1] && recent[1] === recent[2]) {
-                return true;
-            }
-        }
-
-        const windowSize = Math.min(80, Math.floor(source.length / 3));
-        if (windowSize >= 24) {
-            const a = normalizeRepeatKey(source.slice(-windowSize));
-            const b = normalizeRepeatKey(source.slice(-windowSize * 2, -windowSize));
-            if (a && a === b) {
-                return true;
-            }
-        }
-
-        if (lines.length >= 6) {
-            const recent = lines.slice(-6).map((line) =>
-                line
-                    .replace(/^\d+\.\s*/g, "")
-                    .replace(/^[-*]\s*/g, "")
-            );
-            const uniqueRecent = new Set(recent.filter(Boolean));
-            if (uniqueRecent.size <= 3) {
-                return true;
-            }
-        }
-
-        if (trimDuplicateParagraphs(source) !== source.trimEnd()) {
-            return true;
-        }
-
-        if (trimRestartedSentenceBlock(source) !== source.trimEnd()) {
-            return true;
-        }
-        if (trimRepeatedSentenceHistory(source) !== source.trimEnd()) {
-            return true;
-        }
-
-        return hasRepeatedListPattern(source) || hasRepeatedBlockSequence(source);
-    }
-
-    function processRepeatedChunk(incomingText) {
-        const previousRendered = renderedText;
-        const sanitizedIncoming = sanitizeStreamText(incomingText);
-        const trimmed = trimIncomingOverlap(renderedText, sanitizedIncoming);
-        if (!trimmed) {
-            repetitionHits += 1;
-            return { blocked: true, stop: repetitionHits >= 2, text: previousRendered };
-        }
-
-        const normalizedDelta = normalizeRepeatText(trimmed);
-        const normalizedPrevDelta = normalizeRepeatText(previousDelta);
-        let nextText = trimRepeatedSentenceHistory(
-            trimRestartedSentenceBlock(trimDuplicateParagraphs(trimRepeatedTail(renderedText + trimmed)))
-        );
-
-        if (normalizedDelta && normalizedDelta.length >= 12 && normalizedDelta === normalizedPrevDelta) {
-            repetitionHits += 1;
-            return { blocked: true, stop: repetitionHits >= 2, text: previousRendered };
-        }
-
-        if (!nextText) {
-            repetitionHits += 1;
-            return { blocked: true, stop: repetitionHits >= 2, text: previousRendered };
-        }
-
-        if (
-            hasRepeatedSentence(nextText) ||
-            hasRepeatedTailBlock(nextText) ||
-            hasRepeatedListPattern(nextText) ||
-            hasRepeatedBlockSequence(nextText) ||
-            hasExcessiveRepetition(nextText)
-        ) {
-            repetitionHits += 1;
-            nextText = trimRepeatedSentenceHistory(
-                trimRestartedSentenceBlock(trimDuplicateParagraphs(trimRepeatedTail(nextText)))
-            );
-            if (!nextText || normalizeRepeatKey(nextText) === normalizeRepeatKey(previousRendered)) {
-                return { blocked: true, stop: repetitionHits >= 2, text: previousRendered };
-            }
-        } else {
-            repetitionHits = 0;
-        }
-
-        previousDelta = trimmed;
-        renderedText = nextText;
-        if (renderedText === previousRendered) {
-            return { blocked: true, stop: repetitionHits >= 2, text: previousRendered };
-        }
-        return { blocked: false, stop: false, text: renderedText, replace: true };
-    }
-
+async function runLocalInference(promptArr, callback, generationToken = null) {
     if (isLocalActive && !isModelLoaded) {
         await startDownload();
     }
-
-    if (localRuntime === "webllm" && localEngine) {
-        const messages = mapPromptMessagesForLocalEngine(promptArr);
-        if (messages.length === 0) return;
-
-        if (typeof localEngine.resetChat === "function") {
-            try {
-                await localEngine.resetChat();
-            } catch (error) {
-                console.warn("Failed to reset local WebLLM chat state.", error);
-            }
-        }
-
-        const webllmRequest = {
-            messages,
-            temperature: webllmConfig.temperature ?? (isSuperlightTier ? 0.1 : (isLightTierEffective ? 0.18 : 0.65)),
-            top_p: webllmConfig.topP ?? (isSuperlightTier ? 0.5 : (isLightTierEffective ? 0.78 : 0.9)),
-            stream: true
-        };
-        if (typeof webllmConfig.maxTokens === "number") {
-            webllmRequest.max_tokens = webllmConfig.maxTokens;
-        } else if (isSuperlightTier) {
-            webllmRequest.max_tokens = 512;
-        }
-        const stream = await localEngine.chat.completions.create(webllmRequest);
-
-        for await (const chunk of stream) {
-            if (stopSignal) {
-                if (typeof localEngine.interruptGenerate === "function") {
-                    localEngine.interruptGenerate();
-                }
-                break;
-            }
-
-            const delta = chunk && chunk.choices && chunk.choices[0] && chunk.choices[0].delta
-                ? chunk.choices[0].delta.content
-                : "";
-
-            if (delta) {
-                const filtered = processRepeatedChunk(delta);
-                if (filtered.blocked) {
-                    if (filtered.stop && typeof localEngine.interruptGenerate === "function") {
-                        localEngine.interruptGenerate();
-                        break;
-                    }
-                    continue;
-                }
-                callback(filtered.text, { replace: filtered.replace === true });
-            }
-        }
-        return;
-    }
-    
-    const formatted = await wllama.formatChat(promptArr, true);
-    
-    const decoder = new TextDecoder("utf-8");
-    
-    await wllama.createCompletion(formatted, {
-        ...((isSuperlightTier && !isCodeMode) ? { nPredict: 512 } : {}),
-        sampling: (isSuperlightTier && !isCodeMode)
-            ? { temp: 0.12, top_k: 4, top_p: 0.6, penalty_repeat: 1.02 }
-            : (isLightTierEffective
-            ? { temp: 0.18, top_k: 12, top_p: 0.78, penalty_repeat: 1.22 }
-            : { temp: 0.7, top_k: 40, top_p: 0.9 }),
-        onNewToken: (tokenIndex, tokenBytes) => {
-            if (stopSignal) return false;
-            const filtered = processRepeatedChunk(decoder.decode(tokenBytes, { stream: true }));
-            if (filtered.blocked) {
-                return filtered.stop !== true;
-            }
-            callback(filtered.text, { replace: filtered.replace === true });
+    const runToken = Number(generationToken) > 0 ? Number(generationToken) : Number(activeGenerationToken);
+    const messages = mapPromptMessagesForLocalEngine(promptArr);
+    if (!messages.length) return;
+    const formatted = await wllama.formatChat(messages, true);
+    let streamedText = "";
+    const resultText = await wllama.createCompletion(formatted, {
+        sampling: { temp: 0.7, top_k: 40, top_p: 0.9 },
+        onNewToken: (token, piece, currentText) => {
+            if (stopSignal || runToken !== Number(activeGenerationToken)) return false;
+            streamedText = String(currentText || streamedText);
+            callback(streamedText, { replace: true });
             return true;
         }
     });
+    if (stopSignal || runToken !== Number(activeGenerationToken)) return;
+    callback(String(resultText || streamedText || ""), { replace: true });
 }
 
 function showLoader(show) {
@@ -4486,12 +3333,10 @@ function showLoader(show) {
 
 function stopGeneration() {
     if (isGenerating || window.__ISAI_MAIN_GENERATING__) {
+        beginGenerationToken();
         if (abortController) {
             abortController.abort();
             abortController = null;
-        }
-        if (localRuntime === "webllm" && localEngine && typeof localEngine.interruptGenerate === "function") {
-            localEngine.interruptGenerate();
         }
         stopSignal = true;
         setMainGeneratingState(false);
@@ -4530,18 +3375,15 @@ function sanitizeAiHtmlLocal(value) {
 
 function formatAiBubbleContent(content) {
     const raw = String(content ?? "");
-    // IMPORTANT:
-    // Do not decode HTML entities globally here.
-    // If we decode first, code blocks that intentionally contain `&lt;...&gt;`
-    // become real tags and get rendered instead of shown as code.
     const sanitizedRaw = sanitizeAiHtmlLocal(raw);
 
     if (/<\/?[a-z][^>]*>/i.test(sanitizedRaw)) {
         return sanitizedRaw;
     }
 
-    // Preserve legacy encoded line breaks only.
-    return sanitizedRaw
+    const slashNormalized = normalizeAssistantSlashLineBreaks(sanitizedRaw);
+
+    return slashNormalized
         .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
         .replace(/\n/g, "<br>");
 }
@@ -4754,19 +3596,6 @@ function trimRepeatedDisplayText(text) {
             .trimEnd();
     }
 
-    if (sentenceItems.length >= 3) {
-        const lastSentence = sentenceItems[sentenceItems.length - 1];
-        const prevSentenceKeys = sentenceItems.slice(0, -1).map((item) => item.key);
-        const earlierLastIndex = prevSentenceKeys.lastIndexOf(lastSentence.key);
-        if (
-            earlierLastIndex >= 0 &&
-            lastSentence.key.length >= 18 &&
-            String(lastSentence.raw || "").trim().length >= 24
-        ) {
-            value = sentenceItems.slice(0, earlierLastIndex + 1).map((item) => item.raw).join("").trimEnd();
-        }
-    }
-
     const collapsed = normalizeDisplayRepeatKey(value);
     const maxUnit = Math.min(180, Math.floor(collapsed.length / 2));
     for (let size = maxUnit; size >= 24; size -= 1) {
@@ -4808,6 +3637,10 @@ function genericErrorIconHtmlLocal(message) {
         .replace(/"/g, "&quot;")
         .trim() || "Request failed";
     return `<span class="image-error-icon" title="${safeMessage}" aria-label="${safeMessage}"><i class="ri-error-warning-line"></i><i class="ri-close-circle-fill image-error-icon-badge"></i></span>`;
+}
+
+function waitingDotsHtmlLocal() {
+    return `<img src="${WAITING_DOTS_SVG_URL}" alt="loading" class="chat-waiting-dots" style="display:block;width:28px;height:28px;object-fit:contain;pointer-events:none;" draggable="false">`;
 }
 
 function appendMsg(role, content) {
@@ -4858,7 +3691,17 @@ function appendMsg(role, content) {
             bubble.style.boxShadow = "";
             bubble.innerHTML = imageError ? imageErrorIconHtmlLocal(content) : genericErrorIconHtmlLocal(content);
         } else {
-            if (isLocalWelcomeGreeting(content)) {
+            const normalizedContent = String(content ?? "").trim();
+            if (normalizedContent === "...") {
+                bubble.classList.add("chat-bubble-waiting");
+                bubble.style.padding = "8px";
+                bubble.style.width = "fit-content";
+                bubble.style.minWidth = "44px";
+                bubble.style.display = "inline-flex";
+                bubble.style.alignItems = "center";
+                bubble.style.justifyContent = "center";
+                bubble.innerHTML = waitingDotsHtmlLocal();
+            } else if (isLocalWelcomeGreeting(content)) {
                 decorateLocalWelcomeBubbleIfNeeded(bubble, content);
             } else {
                 bubble.innerHTML = formatAiBubbleContent(content);
@@ -5018,7 +3861,6 @@ function parseMarkdownLocal(text, isFinished = false) {
         counter++;
         lang = lang || "text";
         
-        // ?怨쀫? ?꾨뗀諭??癒?탵??獄?癰귣벊沅?疫꿸퀡????袁る퉸 ?癒?궚 ?꾨뗀諭뜻에?癰귣벀???뤿연 獄쏄퀣肉??????
         let cleanCode = code.replace(/&lt;/g, "<").replace(/&gt;/g, ">");
         window.extractedCodes.push({ 
             lang: lang, 
@@ -5033,17 +3875,14 @@ function parseMarkdownLocal(text, isFinished = false) {
         return "###CODE_BLOCK_" + (blocks.length - 1) + "###";
     }
 
-    // 3. ?袁⑹읈?????뿺 ?꾨뗀諭??됰뗀以?筌ｌ꼶??
-    processedMain = processedMain.replace(/```([a-zA-Z0-9_\-\+]*)[ \t]*\n?([\s\S]*?)```/g, (match, lang, code) => {
+    processedMain = processedMain.replace(/```([a-zA-Z0-9_\-\+]*)\n([\s\S]*?)```/g, (match, lang, code) => {
         return createBlockUI(lang, code, false);
     });
 
-    // 4. ?臾믨쉐 餓λ쵐????袁⑹춦 ???뿳筌왖 ??? ?꾨뗀諭??됰뗀以?筌ｌ꼶??(??쎈뱜?귐됱빪 ????
     processedMain = processedMain.replace(/```([a-zA-Z0-9_\-\+]*)[ \t]*\n?([\s\S]*)$/g, (match, lang, code) => {
         return createBlockUI(lang, code, !isFinished);
     });
 
-    // 5. ?紐껋뵬???꾨뗀諭?獄?疫꿸퀡??筌띾뜇寃??쇱뒲 癰궰??
     processedMain = processedMain.replace(/`([^`]+)`/g, (match, inlineCode) => {
         return `<code class="bg-black/[0.06] px-1.5 py-0.5 rounded text-[#111827] font-bold font-mono text-sm border border-black/[0.08]">${inlineCode}</code>`;
     })
@@ -5053,7 +3892,6 @@ function parseMarkdownLocal(text, isFinished = false) {
     .replace(/^[\-\*]\s+(.*)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
     .replace(/\n/g, "<br>");
 
-    // 6. ??밴쉐??紐?UI ?됰뗀以???癒?삋 ?袁⑺뒄????뚯뿯
     blocks.forEach((blockHtml, index) => {
         processedMain = processedMain.replace("###CODE_BLOCK_" + index + "###", blockHtml);
     });
@@ -5101,36 +3939,19 @@ function normalizeCodeLikeResponseForBubbleLocal(value) {
 }
 
 function renderAssistantBubbleContentLocal(text, isFinished = false, options = {}) {
-    const normalizedText = (!!(options && options.forcePlainText) || looksLikeCodeOrHtmlResponseLocal(text))
-        ? normalizeCodeLikeResponseForBubbleLocal(text)
-        : String(text ?? "");
+    const textValue = String(text ?? "");
+    const normalizedText = (!!(options && options.forcePlainText) || looksLikeCodeOrHtmlResponseLocal(textValue))
+        ? normalizeCodeLikeResponseForBubbleLocal(textValue)
+        : normalizeAssistantSlashLineBreaks(textValue);
     return parseMarkdownLocal(normalizedText, isFinished);
 }
 
 function setAssistantBubbleBodyLocal(bubble, text, options = {}) {
     if (!bubble) return;
-    const sourceText = String(text ?? "");
-    const preserveRawDisplay = currentMode === "code" || looksLikeCodeOrHtmlResponseLocal(sourceText);
-    const rawText = preserveRawDisplay ? sourceText.trimEnd() : trimRepeatedDisplayText(sourceText);
+    const normalizedText = normalizeAssistantSlashLineBreaks(String(text ?? ""));
+    const rawText = trimRepeatedDisplayText(normalizedText);
     const plainText = extractPlainTextLocal(rawText);
     if (!plainText) {
-        const rawFallback = preserveRawDisplay ? String(rawText || "").trim() : String(rawText || "")
-            .replace(/<think>[\s\S]*?(<\/think>|$)/gi, " ")
-            .replace(/```json/gi, "")
-            .replace(/```/g, "")
-            .replace(/<br\s*\/?>/gi, "\n")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-        if (rawFallback) {
-            bubble.textContent = rawFallback;
-            return;
-        }
-        const characterSession = getCharacterChatSession();
-        if (characterSession) {
-            bubble.textContent = getCharacterSessionOpeningLine(characterSession);
-            return;
-        }
         const locale = String(document.documentElement.lang || navigator.language || "en").toLowerCase();
         const fallback = locale.startsWith("ko")
             ? "응답을 불러오지 못했습니다."
@@ -5138,23 +3959,10 @@ function setAssistantBubbleBodyLocal(bubble, text, options = {}) {
         bubble.textContent = fallback;
         return;
     }
-    if (preserveRawDisplay) {
-        bubble.style.whiteSpace = "pre-wrap";
-        bubble.style.wordBreak = "break-word";
-        bubble.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-        bubble.style.lineHeight = "1.5";
-        bubble.style.overflowX = "auto";
-        bubble.style.overflowY = "visible";
-        bubble.style.maxHeight = "none";
-    } else {
-        bubble.style.whiteSpace = "";
-        bubble.style.wordBreak = "";
-        bubble.style.fontFamily = "";
-        bubble.style.lineHeight = "";
-        bubble.style.overflowX = "";
-        bubble.style.overflowY = "";
-        bubble.style.maxHeight = "";
-    }
+    bubble.style.whiteSpace = "";
+    bubble.style.wordBreak = "";
+    bubble.style.fontFamily = "";
+    bubble.style.lineHeight = "";
     bubble.innerHTML = renderAssistantBubbleContentLocal(rawText, !!options.isFinished, options);
 }
 
@@ -5926,20 +4734,6 @@ function updateCodePanel(text) {
     }
 }
 
-window.syncGeneratedCodeEditorFromText = function(text) {
-    const rawText = String(text ?? "");
-    if (window.extractedCodes && window.extractedCodes.length > 0) {
-        codeFiles = [...window.extractedCodes];
-        renderCodeTabs();
-        return true;
-    }
-    if (currentMode === "code") {
-        updateCodePanel(normalizeCodeLikeResponseForBubbleLocal(rawText));
-        return true;
-    }
-    return false;
-};
-
 function getCodeTabIcon(lang = "", name = "") {
     const key = String(lang || name || "").toLowerCase();
     if (key.includes("html")) return "ri-html5-line";
@@ -6006,27 +4800,6 @@ function switchTab(index) {
 function resetChat(silent = false) {
     if (isGenerating) stopGeneration();
     clearCharacterChatSession();
-    if (localEngine) {
-        try {
-            if (typeof localEngine.resetChat === "function") {
-                const maybePromise = localEngine.resetChat();
-                if (maybePromise && typeof maybePromise.then === "function") {
-                    maybePromise.catch((error) => {
-                        console.warn("Failed to reset local chat state.", error);
-                    });
-                }
-            } else if (typeof localEngine.clearChatState === "function") {
-                const maybePromise = localEngine.clearChatState();
-                if (maybePromise && typeof maybePromise.then === "function") {
-                    maybePromise.catch((error) => {
-                        console.warn("Failed to clear local chat state.", error);
-                    });
-                }
-            }
-        } catch (error) {
-            console.warn("Failed to reset local chat state.", error);
-        }
-    }
     
     chatHistory =[];
     codeFiles =[];
@@ -6153,12 +4926,12 @@ window.toggleThink = function(headerEl) {
     const CHAT_MODEL_STORAGE_KEY = "ISAI_LOCAL_CHAT_MODEL_ID_V1";
     const MODEL_MENU_ID = "local-model-shortcut-panel";
     const MODEL_MENU_STYLE_ID = "isai-local-model-shortcut-style";
-    const SLOT_ORDER = ["code", "superlight", "light", "middle", "hard"];
-    const MODEL_TYPE_ORDER = ["all", "gemma", "huggingface", "qwen", "granite", "ernie"];
-    const MODEL_TYPE_FILTER_ORDER = ["gemma", "huggingface", "qwen", "granite"];
+    const SLOT_ORDER = ["code", "light", "middle", "hard"];
+    const MODEL_TYPE_ORDER = ["all", "isai", "gemma", "huggingface", "qwen", "granite", "ernie"];
+    const MODEL_TYPE_FILTER_ORDER = ["isai", "gemma", "huggingface", "qwen", "granite"];
+    const ISAI_MODEL_LOGO_URL = "https://cdn.jsdelivr.net/gh/sllkx/icons@main/logo/isai2.png";
     const SLOT_ICON_MAP = {
         code: "ri-code-block",
-        superlight: "ri-windy-line",
         light: "ri-sparkling-2-line",
         middle: "ri-cpu-line",
         hard: "ri-rocket-2-line"
@@ -6184,11 +4957,11 @@ window.toggleThink = function(headerEl) {
                 settings: "\uC124\uC815",
                 changed: "\uB2E8\uCD95 \uBAA8\uB378 \uC124\uC815\uC774 \uC801\uC6A9\uB418\uC5C8\uC2B5\uB2C8\uB2E4",
                 code: "\uCF54\uB4DC",
-                superlight: "\uC288\uD37C\uB77C\uC774\uD2B8",
                 light: "\uB77C\uC774\uD2B8",
                 middle: "\uC911\uAC04",
                 hard: "\uD558\uB4DC",
                 all: "\uC804\uCCB4",
+                isai: "ISAI",
                 qwen: "Qwen",
                 granite: "Granite",
                 gemma: "Gemma",
@@ -6203,11 +4976,11 @@ window.toggleThink = function(headerEl) {
                 settings: "Settings",
                 changed: "Shortcut model setting applied",
                 code: "Code",
-                superlight: "Superlight",
                 light: "Light",
                 middle: "Middle",
                 hard: "Hard",
                 all: "All",
+                isai: "ISAI",
                 qwen: "Qwen",
                 granite: "Granite",
                 gemma: "Gemma",
@@ -6222,11 +4995,11 @@ window.toggleThink = function(headerEl) {
                 settings: "\u8A2D\u5B9A",
                 changed: "\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8\u30E2\u30C7\u30EB\u8A2D\u5B9A\u3092\u9069\u7528\u3057\u307E\u3057\u305F",
                 code: "\u30B3\u30FC\u30C9",
-                superlight: "\u30B9\u30FC\u30D1\u30FC\u30E9\u30A4\u30C8",
                 light: "\u30E9\u30A4\u30C8",
                 middle: "\u4E2D\u9593",
                 hard: "\u30CF\u30FC\u30C9",
                 all: "\u5168\u3066",
+                isai: "ISAI",
                 qwen: "Qwen",
                 granite: "Granite",
                 gemma: "Gemma",
@@ -6241,11 +5014,11 @@ window.toggleThink = function(headerEl) {
                 settings: "\u8BBE\u7F6E",
                 changed: "\u5DF2\u5E94\u7528\u5FEB\u6377\u6A21\u578B\u8BBE\u7F6E",
                 code: "\u4EE3\u7801",
-                superlight: "\u8D85\u8F7B\u91CF",
                 light: "\u8F7B\u91CF",
                 middle: "\u4E2D\u95F4",
                 hard: "\u9AD8\u7EA7",
                 all: "\u5168\u90E8",
+                isai: "ISAI",
                 qwen: "Qwen",
                 granite: "Granite",
                 gemma: "Gemma",
@@ -6260,11 +5033,11 @@ window.toggleThink = function(headerEl) {
                 settings: "Ajustes",
                 changed: "Configuracion de modelo rapido aplicada",
                 code: "Codigo",
-                superlight: "Superligero",
                 light: "Ligero",
                 middle: "Medio",
                 hard: "Alto",
                 all: "Todo",
+                isai: "ISAI",
                 qwen: "Qwen",
                 granite: "Granite",
                 gemma: "Gemma",
@@ -6298,6 +5071,7 @@ window.toggleThink = function(headerEl) {
     function getModelTypeMeta() {
         return {
             all: { icon: "ri-apps-2-line", label: getShortcutText("all") },
+            isai: { icon: "isai-logo", label: getShortcutText("isai") },
             huggingface: { icon: "ri-text", label: "H" },
             qwen: { icon: "ri-qwen-ai-fill", label: getShortcutText("qwen") },
             granite: { icon: "granite-g", label: getShortcutText("granite") },
@@ -6317,6 +5091,9 @@ window.toggleThink = function(headerEl) {
         if (hay.includes("gemma")) return "gemma";
         if (hay.includes("qwen")) return "qwen";
         if (hay.includes("granite")) return "granite";
+        if (hay.includes("haru")) return "isai";
+        if (hay.includes("kori")) return "isai";
+        if (hay.includes("isai")) return "isai";
         if (hay.includes("ernie")) return "ernie";
         return "gemma";
     }
@@ -6325,6 +5102,7 @@ window.toggleThink = function(headerEl) {
         const isCompact = !!compact;
         const sizeClass = isCompact ? " is-compact" : "";
 if (typeKey === "huggingface") return `<span class="local-model-provider-badge huggingface${sizeClass}"><span class="hf-glyph">H</span></span>`;
+        if (typeKey === "isai") return `<span class="local-model-provider-badge isai${sizeClass}"><img src="${ISAI_MODEL_LOGO_URL}" alt="ISAI" class="isai-logo-img"></span>`;
         if (typeKey === "granite") return `<span class="local-model-provider-badge granite${sizeClass}"><span class="model-provider-glyph">G</span></span>`;
         if (typeKey === "qwen") return `<span class="local-model-provider-badge qwen${sizeClass}"><i class="ri-qwen-ai-fill"></i></span>`;
         if (typeKey === "gemma") return `<span class="local-model-provider-badge gemma${sizeClass}"><i class="ri-gemini-fill"></i></span>`;
@@ -6440,35 +5218,32 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
         return getResolvedLocalModelProfiles();
     };
 
-    function ensureShortcutMenuStyle() {
+function ensureShortcutMenuStyle() {
         if (document.getElementById(MODEL_MENU_STYLE_ID)) return;
         const style = document.createElement("style");
         style.id = MODEL_MENU_STYLE_ID;
         style.textContent = `
-#local-model-tier-wrapper{position:absolute;top:12px;right:16px;width:fit-content!important;max-width:min(76vw,304px);border-radius:9999px;overflow:visible}
-#local-model-tier-list{position:relative;display:flex;align-items:center;gap:6px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;width:max-content;max-width:min(calc(100vw - 16px),312px);padding:4px 4px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%)}
-#local-model-tier-list #local-model-tier-menu-btn{position:sticky;right:0;z-index:6;background:rgba(255,255,255,.035);flex:0 0 28px}
-@media (max-width: 768px){#local-model-tier-wrapper{position:fixed;top:12px;right:74px;left:auto;width:fit-content!important;max-width:min(calc(100vw - 88px),264px);z-index:90;border-radius:9999px;overflow:visible}#local-model-tier-list{max-width:min(calc(100vw - 88px),214px);gap:4px;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 10px),transparent 100%)}}
-.local-model-shortcut-panel{position:absolute;top:44px;right:0;width:100%;min-width:100%;max-width:100%;height:min(194px,calc(100vh - 240px));max-height:min(194px,calc(100vh - 240px));padding:6px 5px 5px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(10,10,11,.96);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 14px 34px rgba(0,0,0,.34);display:none;flex-direction:column;z-index:50;overflow:hidden!important}
+#local-model-tier-wrapper{max-width:min(76vw,340px);overflow:visible!important}
+#local-model-tier-list{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+.local-model-shortcut-panel{position:absolute;top:44px;right:0;width:100%;min-width:100%;max-width:100%;height:min(236px,calc(100vh - 208px));max-height:min(236px,calc(100vh - 208px));padding:8px 6px 6px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(10,10,11,.96);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 14px 34px rgba(0,0,0,.34);display:none;flex-direction:column;z-index:50;overflow:hidden!important}
 .local-model-shortcut-panel.is-open{display:block}
 .local-model-shortcut-panel.is-open{display:flex}
 .local-model-shortcut-panel::-webkit-scrollbar{display:block!important;width:5px!important}
 .local-model-shortcut-panel::-webkit-scrollbar-track{background:transparent!important}
 .local-model-shortcut-panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22)!important;border-radius:999px!important}
-.local-model-shortcut-head{display:flex;align-items:center;gap:5px;margin-bottom:6px;min-width:0;flex:0 0 auto}
+.local-model-shortcut-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;min-width:0;flex:0 0 auto}
 .local-model-shortcut-title{display:none!important}
-.local-model-shortcut-tools{display:flex;align-items:center;gap:3px;flex:0 0 auto}
+.local-model-shortcut-tools{display:flex;align-items:center;gap:4px;flex:0 0 auto}
 .local-model-tier-menu-btn,.local-model-shortcut-icon-btn,.local-model-filter-btn{position:relative;width:28px;height:28px;min-width:28px;min-height:28px;max-width:28px;max-height:28px;aspect-ratio:1/1;padding:0;border:1px solid rgba(255,255,255,.08);border-radius:50%;background:rgba(255,255,255,.035);color:rgba(255,255,255,.78);display:inline-flex;align-items:center;justify-content:center;align-self:center;cursor:pointer;flex:0 0 28px;overflow:hidden;box-sizing:border-box;box-shadow:none;transition:background-color .16s ease,border-color .16s ease,color .16s ease}
-.local-model-filter-btn{width:28px;min-width:28px;max-width:28px;height:28px;min-height:28px;max-height:28px;flex-basis:28px}
+.local-model-filter-btn{width:24px;min-width:24px;max-width:24px;height:24px;min-height:24px;max-height:24px;flex-basis:24px}
 .local-model-tier-menu-btn::after,.local-model-shortcut-icon-btn::after,.local-model-filter-btn::after{content:"";position:absolute;inset:1px;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,0));opacity:.5;pointer-events:none}
 .local-model-filter-btn.provider-all{display:none!important}
-.local-model-tier-menu-btn>i,.local-model-shortcut-icon-btn>i,.local-model-filter-btn>i{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px!important;line-height:1;transform:none!important;transition:color .16s ease;margin:0;padding:0;text-align:center}
-#local-model-tier-menu-btn>i{font-size:12px!important}
-#btn-webgpu>i{font-size:12px!important}
+.local-model-tier-menu-btn>i,.local-model-shortcut-icon-btn>i,.local-model-filter-btn>i{font-size:13px!important;line-height:1;transform:none!important;transition:color .16s ease}
 .local-model-tier-menu-btn:hover,.local-model-tier-menu-btn.is-open,.local-model-shortcut-icon-btn:hover,.local-model-shortcut-icon-btn.is-open,.local-model-filter-btn:hover,.local-model-filter-btn.is-active{color:#fff;box-shadow:none}
 .local-model-tier-menu-btn:hover,.local-model-tier-menu-btn.is-open,.local-model-shortcut-icon-btn:hover,.local-model-shortcut-icon-btn.is-open{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.16)}
-#local-model-tier-menu-btn:hover,#local-model-tier-menu-btn.is-open{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.16)!important;color:rgba(255,255,255,.94)!important}
-#local-model-tier-menu-btn:hover>i,#local-model-tier-menu-btn.is-open>i{color:inherit!important}
+.local-model-filter-btn.provider-isai{padding:0;border:none;background:transparent;color:inherit}
+.local-model-filter-btn.provider-isai::after{display:none}
+.local-model-filter-btn.provider-isai:hover,.local-model-filter-btn.provider-isai.is-active{background:transparent;border:none;color:inherit}
 .local-model-filter-btn.provider-gemma{background:linear-gradient(180deg,rgba(96,165,250,.12),rgba(29,78,216,.04));border-color:rgba(96,165,250,.18);color:#bfdbfe}
 .local-model-filter-btn.provider-gemma:hover,.local-model-filter-btn.provider-gemma.is-active{background:linear-gradient(180deg,#60a5fa,#1d4ed8);border-color:rgba(147,197,253,.72);color:#fff}
 .local-model-filter-btn.provider-huggingface{background:linear-gradient(180deg,rgba(250,204,21,.14),rgba(234,179,8,.05));border-color:rgba(250,204,21,.22);color:#fde68a}
@@ -6483,29 +5258,34 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
 .local-model-shortcut-tools > .local-model-shortcut-icon-btn,
 .local-model-filter-row > .local-model-filter-btn{transform:none!important}
 .local-model-filter-row::-webkit-scrollbar{display:none}
-.local-model-filter-row.in-head{flex:1 1 auto}
+
+/* in-head 안의 리스트 높이 및 이미지 버튼 통일 처리 추가 */
+.local-model-filter-row.in-head{flex:1 1 auto;align-items:center!important}
+.local-model-filter-row.in-head > *{height:24px!important;min-height:24px!important;max-height:24px!important;box-sizing:border-box!important;vertical-align:middle;margin-top:0!important;margin-bottom:0!important}
+.local-model-filter-row.in-head img, .local-model-filter-row.in-head .isai-logo-img{height:100%!important;max-height:100%!important;object-fit:cover!important;display:block}
+
 .local-model-catalog-scroll{display:block!important;flex:1 1 auto;min-height:0;height:0;max-height:100%;overflow-y:auto!important;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.22) transparent;padding-right:1px}
 .local-model-catalog-scroll::-webkit-scrollbar{display:block!important;width:5px!important}
 .local-model-catalog-scroll::-webkit-scrollbar-track{background:transparent!important}
 .local-model-catalog-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22)!important;border-radius:999px!important}
-.local-model-catalog-grid{display:flex;flex-direction:column;gap:5px}
-.local-model-catalog-card{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:6px 8px;border-radius:9px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(23,23,24,.96),rgba(18,18,19,.96));cursor:pointer;transition:background-color .14s ease,border-color .14s ease,box-shadow .14s ease}
+.local-model-catalog-grid{display:flex;flex-direction:column;gap:6px}
+.local-model-catalog-card{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border-radius:10px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(23,23,24,.96),rgba(18,18,19,.96));cursor:pointer;transition:background-color .14s ease,border-color .14s ease,box-shadow .14s ease}
 .local-model-catalog-card:hover{border-color:rgba(255,255,255,.2);background:linear-gradient(180deg,rgba(28,28,30,.98),rgba(20,20,22,.98));box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 .local-model-catalog-card.is-selected{border-color:rgba(255,255,255,.28);background:linear-gradient(180deg,rgba(31,31,34,.98),rgba(21,21,23,.98));box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
 .local-model-catalog-meta{min-width:0;display:flex;flex-direction:column;gap:2px;flex:1 1 auto}
-.local-model-catalog-name{font-size:9px;font-weight:800;color:#fff;line-height:1.15;white-space:normal;overflow:visible;text-overflow:clip;display:block;max-width:none;word-break:keep-all;overflow-wrap:anywhere}
+.local-model-catalog-name{font-size:10px;font-weight:800;color:#fff;line-height:1.2;white-space:normal;overflow:visible;text-overflow:clip;display:block;max-width:none;word-break:keep-all;overflow-wrap:anywhere}
 .local-model-slot-actions{display:flex;align-items:center;justify-content:flex-end;align-self:center;gap:7px;flex:0 0 auto;height:auto!important;min-height:0!important;margin:0}
 .local-model-slot-actions > *{align-self:center!important;margin-top:0!important;margin-bottom:0!important;position:relative;top:0!important;bottom:auto!important}
-.local-model-provider-button{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;min-width:18px;min-height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.03);padding:0;flex:0 0 auto}
-.local-model-size-pill{height:20px;padding:0 6px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);font-size:9px;font-weight:800;color:rgba(255,255,255,.86);display:inline-flex;align-items:center;justify-content:center;letter-spacing:.01em}
+.local-model-provider-button{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;min-height:20px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.03);padding:0;flex:0 0 auto}
+.local-model-size-pill{height:22px;padding:0 7px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);font-size:10px;font-weight:800;color:rgba(255,255,255,.86);display:inline-flex;align-items:center;justify-content:center;letter-spacing:.01em}
 .local-model-assign-row{display:none;align-items:center;gap:4px}
 .local-model-shortcut-panel.is-assign-mode .local-model-assign-row{display:flex}
-.local-model-slot-assign{width:20px;height:20px;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .16s ease}
-.local-model-slot-assign i{font-size:11px}
+.local-model-slot-assign{width:22px;height:22px;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .16s ease}
+.local-model-slot-assign i{font-size:12px}
 .local-model-slot-assign:hover,.local-model-slot-assign.is-active{background:#f0f0f0;color:#111}
-.local-model-current-pill{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;border:1px solid rgba(255,255,255,.18);font-size:10px;font-weight:700;color:#fff;background:rgba(255,255,255,.04)}
-.local-model-current-pill i{font-size:11px;color:rgba(255,255,255,.75)}
-.local-model-provider-badge{display:flex;align-items:center;justify-content:center;width:18px;height:18px;min-width:18px;min-height:18px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);font-size:9px;line-height:1;color:#fff;flex:0 0 auto;text-align:center;padding:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);position:relative;top:0;transform:none!important;vertical-align:middle;overflow:hidden}
+.local-model-current-pill{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;border:1px solid rgba(255,255,255,.18);font-size:11px;font-weight:700;color:#fff;background:rgba(255,255,255,.04)}
+.local-model-current-pill i{font-size:12px;color:rgba(255,255,255,.75)}
+.local-model-provider-badge{display:flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;min-height:20px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);font-size:10px;line-height:1;color:#fff;flex:0 0 auto;text-align:center;padding:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);position:relative;top:0;transform:none!important;vertical-align:middle;overflow:hidden}
 .local-model-provider-badge i,.local-model-provider-badge .hf-glyph,.local-model-provider-badge .model-provider-glyph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;line-height:1;transform:none!important;margin:0;padding:0}
 .local-model-provider-badge i::before{display:block;line-height:1;margin:0}
 .local-model-provider-badge.is-compact{width:100%;height:100%;min-width:100%;min-height:100%;border-width:1px;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
@@ -6519,6 +5299,11 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
 .local-model-provider-badge.huggingface .hf-glyph{font-size:7px;font-weight:800;letter-spacing:-.01em}
 .local-model-provider-badge.huggingface.is-compact{background:linear-gradient(180deg,#facc15,#eab308)!important;border-color:rgba(254,240,138,.42)!important;color:#ffffff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
 .local-model-provider-badge.huggingface.is-compact .hf-glyph{font-size:6.6px}
+.local-model-provider-badge.isai{background:transparent;border:none;box-shadow:none;padding:0}
+.local-model-provider-badge.isai.is-compact{background:transparent!important;border:none!important;box-shadow:none!important;color:inherit!important}
+.local-model-provider-badge .isai-logo-img{width:100%;height:100%;object-fit:cover;display:block;margin:0;padding:0;border-radius:inherit}
+.local-model-filter-btn.provider-isai .local-model-provider-badge.isai.is-compact{width:20px;min-width:20px;max-width:20px;height:20px;min-height:20px;max-height:20px}
+.local-model-provider-button .local-model-provider-badge.isai.is-compact{width:20px;min-width:20px;max-width:20px;height:20px;min-height:20px;max-height:20px}
 .local-model-provider-badge.qwen{position:relative;background:linear-gradient(180deg,#7c3aed,#5b21b6);border-color:rgba(196,181,253,.42);color:#ffffff;font-weight:800}
 .local-model-provider-badge.qwen i{font-size:11px;color:#ffffff}
 .local-model-provider-badge.qwen.is-compact{background:linear-gradient(180deg,#7c3aed,#5b21b6)!important;border-color:rgba(196,181,253,.42)!important;color:#ffffff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
@@ -6533,7 +5318,9 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
 .local-model-provider-badge.granite.is-compact{background:linear-gradient(180deg,#3b82f6,#2563eb)!important;border-color:rgba(191,219,254,.38)!important;color:#ffffff!important;font-size:8.5px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
         `;
         document.head.appendChild(style);
-    }
+
+	}
+
 
     function closeLocalModelShortcutMenu() {
         const panel = document.getElementById(MODEL_MENU_ID);
@@ -6544,7 +5331,7 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
     }
 
     function getCatalogItems() {
-        const typeRank = { gemma: 0, qwen: 1, granite: 2, ernie: 3 };
+        const typeRank = { isai: 0, gemma: 1, qwen: 2, granite: 3, ernie: 4, huggingface: 5 };
         return Object.values(getModelCatalog()).filter((item) => String(item && item.id ? item.id : "") !== "qwen_coder_05b_q3kl").map((item) => {
             const next = Object.assign({}, item || {});
             next.modelType = getModelTypeFromItem(next);
@@ -6612,7 +5399,6 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
         } else {
             isLocalActive = true;
             isModelLoaded = false;
-            localEngine = null;
             wllama = null;
             if (typeof setLocalRuntimeState === "function") setLocalRuntimeState(null);
             maybeStartActiveTierDownload(true);
@@ -6855,7 +5641,6 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
         applyLocalModelProfileToConfig();
         isLocalActive = true;
         isModelLoaded = false;
-        localEngine = null;
         wllama = null;
         if (typeof setLocalRuntimeState === "function") setLocalRuntimeState(null);
         isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
@@ -6967,3 +5752,7 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
         }, 0);
     });
 })();
+
+
+
+

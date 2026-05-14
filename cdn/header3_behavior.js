@@ -209,7 +209,7 @@
             localStorage.setItem('ISAI_GH_USERNAME', username);
             localStorage.setItem('ISAI_GH_REPO', repo);
             localStorage.setItem('ISAI_GH_TOKEN', token);
-            if (typeof showToast === 'function') showToast('GitHub 설정 저장 완료');
+            if (typeof showToast === 'function') showToast('GitHub settings saved');
             return true;
         }
         function openGitHubConnectModal() {
@@ -933,18 +933,10 @@ window.chooseImageReportType = chooseImageReportType;
 function __getDefaultChatGreeting() {
     const serverI18n = window.ISAI_SERVER_I18N || {};
     if (serverI18n.welcomeMessage) return serverI18n.welcomeMessage;
-    return 'Hello! How can I help you? ?삃';
+    return 'Hello! How can I help you?';
 }
 
 function __normalizeDefaultGreeting(message, localeHint) {
-    /*
-    if (!raw) return '';
-    const cleaned = raw.replace(/\???g, '?삃').replace(/\s+/g, ' ').trim();
-    if ((String(localeHint || '').toLowerCase().startsWith('ko') || /[???롪?-??/.test(cleaned)) && /?꾩??쒕┫源뚯슂|萸??꾩??쒕┫源뚯슂/.test(cleaned)) {
-        return '?덈뀞?섏꽭?? 臾댁뾿???꾩??쒕┫源뚯슂? ?삃';
-    }
-    return cleaned;
-    */
     return String(message || "").replace(/\s+/g, " ").trim();
 }
 
@@ -955,18 +947,12 @@ function __getDefaultChatGreeting() {
         const normalized = __normalizeDefaultGreeting(serverI18n.welcomeMessage, localeHint);
         if (normalized) return normalized;
     }
-    return localeHint.startsWith('ko') ? '?덈뀞?섏꽭?? 臾댁뾿???꾩??쒕┫源뚯슂? ?삃' : 'Hello! How can I help you? ?삃';
+    return 'Hello! How can I help you?';
 }
 
 function __normalizeDefaultGreeting(message, localeHint) {
     const raw = String(message || "").replace(/\s+/g, " ").trim();
     if (!raw) return "";
-    const isKoreanLocale = String(localeHint || "").toLowerCase().startsWith("ko");
-    const hasKoreanText = /[\u3131-\u318e\uac00-\ud7a3]/.test(raw);
-    const hasLegacyPhrase = /\ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694|\ubb50\s*\ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694/.test(raw);
-    if ((isKoreanLocale || hasKoreanText) && hasLegacyPhrase) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
-    }
     return raw;
 }
 
@@ -977,42 +963,12 @@ function __getDefaultChatGreeting() {
         const normalized = __normalizeDefaultGreeting(serverI18n.welcomeMessage, localeHint);
         if (normalized) return normalized;
     }
-    return localeHint.startsWith("ko")
-        ? "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a"
-        : "Hello! How can I help you? \ud83d\ude0a";
+    return "Hello! How can I help you?";
 }
 
-/*
-// Final override to guarantee a clean default greeting even when legacy strings are garbled.
-function __normalizeDefaultGreeting(message, localeHint) {
-    const raw = String(message || "").replace(/\???g, "\ud83d\ude0a").replace(/\s+/g, " ").trim();
-    if (!raw) return "";
-    const isKoreanLocale = String(localeHint || "").toLowerCase().startsWith("ko");
-    const hasKoreanText = /[\u3131-\u318e\uac00-\ud7a3]/.test(raw);
-    const hasLegacyPhrase = /\ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694|\ubb50\s*\ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694/.test(raw);
-    if ((isKoreanLocale || hasKoreanText) && hasLegacyPhrase) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
-    }
-    if (isKoreanLocale && !hasKoreanText) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
-    }
-    return raw;
-}
 
-function __getDefaultChatGreeting() {
-    const serverI18n = window.ISAI_SERVER_I18N || {};
-    const localeHint = String(serverI18n.locale || document.documentElement?.lang || navigator.language || "ko").toLowerCase();
-    if (serverI18n.welcomeMessage) {
-        const normalized = __normalizeDefaultGreeting(serverI18n.welcomeMessage, localeHint);
-        if (normalized) return normalized;
-    }
-    if (localeHint.startsWith("ko")) {
-        return "\uc548\ub155\ud558\uc138\uc694. \ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694? \ud83d\ude0a";
-    }
-    return "Hello! How can I help you? \ud83d\ude0a";
-}
 
-*/
+
 
 function __normalizeDefaultGreeting(message, localeHint) {
     const decodeEscaped = (value) => {
@@ -1096,6 +1052,8 @@ function __ensureChatSpacer(chatBox) {
 function __ensureDefaultChatGreeting(force) {
     const chatBox = document.getElementById('chat-box');
     if (!chatBox) return;
+    if (document.body && document.body.classList.contains('character-chat-active')) return;
+    if (window.ISAI_CHARACTER_CHAT_SESSION && window.ISAI_CHARACTER_CHAT_SESSION.active) return;
 
     if (force) {
         chatBox.querySelectorAll('.__default-chat-greeting').forEach(function(node) {
@@ -1122,7 +1080,7 @@ function __ensureDefaultChatGreeting(force) {
     bubble.style.cursor = 'pointer';
     bubble.setAttribute('role', 'button');
     bubble.setAttribute('tabindex', '0');
-    bubble.setAttribute('title', '로컬모드 활성화');
+    bubble.setAttribute('title', 'Enable local mode');
     bubble.addEventListener('click', function(event) {
         event.preventDefault();
         event.stopPropagation();

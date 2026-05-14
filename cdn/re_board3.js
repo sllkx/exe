@@ -198,6 +198,11 @@ document.addEventListener('alpine:init', () => {
         renderMarketHeatmapWidget(f=false){
             if(!this.supportsHeatmapMode())return; const h=this.$refs.marketHeatmapWidget, m=String(this.marketMode||''); if(!h||(!f&&h.dataset.loaded==='1'&&h.dataset.mode===m))return;
             h.innerHTML=''; h.dataset.loaded='0'; h.dataset.mode=m;
+            const wrap = document.createElement('div');
+            wrap.className = 'tradingview-widget-container market-heatmap-container';
+            const widget = document.createElement('div');
+            widget.className = 'tradingview-widget-container__widget market-heatmap-widget';
+            wrap.appendChild(widget);
             let scr=document.createElement('script'); scr.type='text/javascript'; scr.async=true;
             if(m==='crypto'){
                 scr.src='https://s3.tradingview.com/external-embedding/embed-widget-crypto-coins-heatmap.js';
@@ -206,7 +211,21 @@ document.addEventListener('alpine:init', () => {
                 scr.src='https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js';
                 scr.text=JSON.stringify({exchanges:[],dataSource:this.marketHeatmapSource||'SPX500',blockSize:'market_cap_basic',blockColor:'change',grouping:'sector',locale:this.marketHeatmapLocale||'en',colorTheme:'dark',hasTopBar:false,isDataSetEnabled:false,isZoomEnabled:true,hasSymbolTooltip:true,width:'100%',height:'100%'});
             }
-            scr.onload=()=>{h.dataset.loaded='1'; h.dataset.mode=m;}; h.appendChild(document.createElement('div').appendChild(scr).parentNode);
+            scr.onload=()=>{h.dataset.loaded='1'; h.dataset.mode=m; this.$nextTick(()=>this.fixMarketHeatmapHeight());};
+            wrap.appendChild(scr);
+            h.appendChild(wrap);
+            setTimeout(()=>this.fixMarketHeatmapHeight(), 600);
+            setTimeout(()=>this.fixMarketHeatmapHeight(), 1600);
+        },
+        fixMarketHeatmapHeight(){
+            const h=this.$refs.marketHeatmapWidget;
+            if(!h)return;
+            h.querySelectorAll('.tradingview-widget-container,.tradingview-widget-container__widget,iframe').forEach(el=>{
+                el.style.width='100%';
+                el.style.height='100%';
+                el.style.minHeight='100%';
+                el.style.display='block';
+            });
         },
         getTradingViewChartUrl(){ const fb={stocks:'SP:SPX',gold:'OANDA:XAUUSD',crypto:'BINANCE:BTCUSDT',commodities:'TVC:USOIL'}[this.marketMode]||'SP:SPX'; return `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(this.selectedMarketSymbol||fb)}&interval=60&hidesidetoolbar=1&symboledit=1&saveimage=0&toolbarbg=111111&theme=dark&style=1&timezone=Asia%2FSeoul&withdateranges=1&hideideas=1`; },
 

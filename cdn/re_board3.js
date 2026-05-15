@@ -297,7 +297,7 @@ document.addEventListener('alpine:init', () => {
 
         scoreByInterestBase(tb, i) {
             let s = 0;
-            const itemText = String(`${i?.title||''} ${i?.content||''} ${i?.prompt||''} ${i?.category||''}`).toLowerCase();
+            const itemText = String(`${i?.title||''} ${i?.cleanTitle||''} ${i?.content||''} ${i?.snippet||''} ${i?.listText||''} ${i?.prompt||''} ${i?.category||''} ${i?.keywords||''} ${i?.description||''} ${i?.source||''}`).toLowerCase();
             Object.keys(this.interestProfile).forEach(k => {
                 if(k.startsWith('kw_') && itemText.includes(k.replace('kw_',''))) {
                     s += (this.interestProfile[k] * 10);
@@ -350,7 +350,7 @@ document.addEventListener('alpine:init', () => {
             setTimeout(() => { if (this.items[tb]?.length) { this.applyInterestSort(tb); this.updateMacy(tb); } }, 300);
         },
         trackInterest(tb, i, w=1){ 
-            const text = String(`${i?.title||''} ${i?.content||''} ${i?.prompt||''} ${i?.category||''}`).toLowerCase();
+            const text = String(`${i?.title||''} ${i?.cleanTitle||''} ${i?.content||''} ${i?.snippet||''} ${i?.listText||''} ${i?.prompt||''} ${i?.category||''} ${i?.keywords||''} ${i?.description||''} ${i?.source||''}`).toLowerCase();
             const words = text.replace(/[^a-z0-9가-힣_]+/g, ' ').split(/\s+/).filter(x=>x.length>1).slice(0,10);
             let u = false;
             words.forEach(k => { 
@@ -358,29 +358,45 @@ document.addEventListener('alpine:init', () => {
                 this.interestProfile[pKey] = Math.min(500, Math.max(0, (this.interestProfile[pKey]||0) + w)); 
                 u = true; 
             }); 
-            if(u){ localStorage.setItem('isai_interest_profile_v1',JSON.stringify(this.interestProfile)); } 
+            if(u){
+                localStorage.setItem('isai_interest_profile_v1',JSON.stringify(this.interestProfile));
+                clearTimeout(this.sponsorSearchTimer);
+                this.sponsorSearchTimer = setTimeout(() => this.loadSearchProducts?.(), 250);
+            } 
         },
         
         productPriceLabel(i){ const cur=String(i?.currency||'KRW').toUpperCase(); const n=Number(i?.price||0); return cur==='USD'?'$'+n.toLocaleString(undefined,{maximumFractionDigits:2}):Math.round(n).toLocaleString()+'원'; },
         scoreProduct(i){ return this.scoreByInterestBase('products',i)+(Number(this.productProfile[i?.id]||0)*100)+(Number(i?.sort_order||0)); },
         
-        getVisibleProducts(){ return Array.isArray(this.items.products)?this.items.products.slice().sort((a,b)=>this.scoreProduct(b)-this.scoreProduct(a)||(Number(b.id||0)-Number(a.id||0))).slice(0,4):[]; },
+        isProductSearchMode() {
+            // 카테고리 클릭이 아닌, 실제 검색어가 입력된 상태인지 탭별로 정확히 구분
+            if (this.curTab === 'news') return !!this.newsQuery && this.newsQuery !== this.selectedNewsCategoryQ;
+            if (this.curTab === 'store') return !!this.storeQuery;
+            if (this.curTab === 'forum') return !!this.forumQuery;
+            if (this.curTab === 'code') return !!this.codeQuery;
+            if (this.curTab === 'gallery') return !!this.galleryQuery;
+            return !!this.searchQuery;
+        },
+        getVisibleProducts(){
+            const limit = this.isProductSearchMode() ? 24 : 3;
+            return Array.isArray(this.items.products) 
+                ? this.items.products.slice().sort((a,b)=>this.scoreProduct(b)-this.scoreProduct(a)||(Number(b.id||0)-Number(a.id||0))).slice(0,limit)
+                : [];
+        },
         getVisibleNewsItems(){ return Array.isArray(this.items.news) ? this.items.news :[]; },
 
-        // =========================================================================
-        // [안정적인 믹스 & 무한스크롤 지원] 모든 탭 전용 광고 믹서
-        // =========================================================================
         getMixedItems(tb) {
             const visibleItems = tb === 'news' ? this.getVisibleNewsItems() : (this.items[tb] || []);
-            if (!visibleItems.length) return[];
+            if (!visibleItems.length) return [];
             
             const original = visibleItems.map((item, idx) => ({type: tb, item, key: `${tb}-${item.id || item.link || idx}`}));
             const products = this.getVisibleProducts().map((item) => ({type: 'product', item, key: `product-${item.id}`, score: this.scoreProduct(item)}));
             
             if (!products.length) return original;
             
-            const out =[];
+            const out = [];
             let pQueue = [...products].sort((a, b) => b.score - a.score);
+            const isSearch = this.isProductSearchMode();
             
             // 시드 기반 난수 생성 (화면 깜빡임 완벽 방지)
             const getSeed = (str) => {
@@ -390,14 +406,28 @@ document.addEventListener('alpine:init', () => {
             original.forEach((entry, idx) => {
                 out.push(entry);
                 let seed = getSeed(entry.key);
-                // 약 20%~30% 확률로 각 글 뒤에 상품을 삽입
-                if (idx >= 1 && (seed % 10) < 2 && pQueue.length > 0) {
+                let insertCount = 0;
+
+                if (isSearch) {
+                    // [검색 모드] 상품이 최대 33개이므로 일반 게시물 사이마다 1~2개씩 촘촘하게 섞음
+                    insertCount = (seed % 10) < 4 ? 2 : 1; // 40% 확률로 2개, 60% 확률로 1개 삽입
+                } else {
+                    // [일반 모드] 기본 광고 3개이므로 2, 6, 11번째 위치와 드물게(30%) 1개씩 삽입
+                    let forceInsert = (idx === 2 || idx === 6 || idx === 11);
+                    if (forceInsert || (idx >= 1 && (seed % 10) < 3)) {
+                        insertCount = 1;
+                    }
+                }
+
+                // 큐에 상품이 남아있고 넣어야 할 카운트가 있으면 빼서 삽입
+                while (pQueue.length > 0 && insertCount > 0) {
                     out.push(pQueue.shift());
+                    insertCount--;
                 }
             });
             
-            // 남은 광고들을 맨 뒤에 추가
-            while(pQueue.length > 0 && out.length < original.length + products.length) {
+            // 위에서 다 섞지 못하고 남은 상품/광고가 있다면 맨 뒤에 추가
+            while(pQueue.length > 0) {
                 out.push(pQueue.shift());
             }
             return out;
@@ -572,19 +602,43 @@ document.addEventListener('alpine:init', () => {
             this.refreshInterestLayout(t); 
         },
 
+        getTopInterestKeywords(limit=5){
+            return Object.entries(this.interestProfile || {})
+                .filter(([key, value]) => key.startsWith('kw_') && Number(value) > 0)
+                .sort((a, b) => Number(b[1]) - Number(a[1]))
+                .slice(0, limit)
+                .map(([key]) => key.replace(/^kw_/, ''))
+                .filter(Boolean);
+        },
+
+        getSponsorSearchQuery(base=''){
+            const terms = [];
+            String(base || '').split(/\s+/).forEach(v => {
+                const t = v.trim();
+                if (t && t.toLowerCase() !== 'all') terms.push(t);
+            });
+            this.getTopInterestKeywords(5).forEach(t => {
+                if (!terms.some(x => x.toLowerCase() === t.toLowerCase())) terms.push(t);
+            });
+            return terms.slice(0, 8).join(' ');
+        },
+
         async loadSearchProducts(){
             let q = '';
-            if (this.curTab === 'news') q = this.newsQuery || this.selectedNewsCategoryQ;
-            else if (this.curTab === 'store') q = this.storeQuery || this.selectedStoreCategory;
-            else if (this.curTab === 'forum') q = this.forumQuery || this.selectedForumCategory;
-            else if (this.curTab === 'code') q = this.codeQuery || this.selectedCodeCategory;
-            else if (this.curTab === 'gallery') q = this.galleryQuery || this.selectedGalleryCategory;
+            const isSearchMode = this.isProductSearchMode();
+            if (isSearchMode && this.curTab === 'news') q = this.newsQuery;
+            else if (isSearchMode && this.curTab === 'store') q = this.storeQuery;
+            else if (isSearchMode && this.curTab === 'forum') q = this.forumQuery;
+            else if (isSearchMode && this.curTab === 'code') q = this.codeQuery;
+            else if (isSearchMode && this.curTab === 'gallery') q = this.galleryQuery;
             
-            q = String(q || this.searchQuery || '').trim();
+            q = String(q || (isSearchMode ? this.searchQuery : '') || '').trim();
             if(q === 'all') q = '';
 
             try{
-                const r = await fetch(`/re_products.php?action=list_products&q=${encodeURIComponent(q)}&limit=12`);
+                const productLimit = isSearchMode ? 24 : 3;
+                const lang = String(window.ISAI_SERVER_I18N?.locale || window.__RE_BOARD3_CONFIG__?.marketHeatmapLocale || 'all').trim();
+                const r = await fetch(`/re_products.php?action=list_products&q=${encodeURIComponent(q)}&limit=${productLimit}&lang=${encodeURIComponent(lang)}`);
                 const j = await r.json();
                 this.items.products = Array.isArray(j?.data) ? j.data :[];
                 this.applyInterestSort('products');
@@ -592,9 +646,6 @@ document.addEventListener('alpine:init', () => {
             }catch(e){ this.items.products=[]; }
         },
 
-        // =========================================================================
-        // [강력 무한 스크롤 엔진] 반응성 보장 (배열 재할당 방식 적용)
-        // =========================================================================
         async loadData(t) {
             if (this.loading[t]||this.end[t]) return; 
             this.loading[t] = true;
@@ -625,9 +676,15 @@ document.addEventListener('alpine:init', () => {
 
                     // Alpine.js 배열 반응성을 100% 보장하기 위해 push 대신 재할당
                     if(newItems.length > 0) {
+                        const wasEmpty = this.items[t].length === 0;
+                        const currentPage = this.page[t];
                         this.items[t] = [...this.items[t], ...newItems];
                         if(t==='news') this.end[t]=true; else this.page[t]++;
-                        this.refreshInterestLayout(t);
+                        if (wasEmpty || currentPage <= 1) {
+                            this.refreshInterestLayout(t);
+                        } else {
+                            this.$nextTick(() => { this.updateMacy(t); setTimeout(() => { this.updateMacy(t); }, 150); });
+                        }
                     } else {
                         this.end[t] = true;
                     }

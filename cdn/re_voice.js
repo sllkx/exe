@@ -301,6 +301,9 @@ async function performVoiceConversationRequest(text) {
         if (typeof activeApp !== 'undefined' && activeApp && activeApp.system_prompt) {
             sysPrompt = String(activeApp.system_prompt || '').trim();
         }
+        if (typeof window.buildIsaiSystemPrompt === 'function') {
+            sysPrompt = window.buildIsaiSystemPrompt(sysPrompt);
+        }
 
         const history = Array.isArray(chatHistory)
             ? chatHistory

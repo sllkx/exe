@@ -528,6 +528,7 @@ function createScopedTargetFromBlock(block, fileIndex = activeFileIndex) {
         endOffset: Number.isFinite(Number(block.endOffset)) ? Number(block.endOffset) : 0,
         sourceText: String(block.currentText != null ? block.currentText : (block.sourceText || "")),
         originalBlock: String(block.sourceText || ""),
+        promptText: String(block.promptText || block.currentText || block.sourceText || "").trim(),
         label: String(block.label || ""),
         lang: String(block.lang || ""),
         startLine: Number.isFinite(Number(block.startLine)) ? Number(block.startLine) : 0,
@@ -805,7 +806,7 @@ function buildScopedCodeEditPrompt(block, instruction, fileInfo = {}) {
         String(instruction || "").trim(),
         "",
         "[Current block code]",
-        String(block && block.promptText ? block.promptText : "").trim()
+        String(block && (block.promptText || block.sourceText) ? (block.promptText || block.sourceText) : "").trim()
     ].filter(Boolean).join("\n");
 }
 
@@ -862,6 +863,54 @@ function renderCodeBlockActions() {
     renderPromptAttachmentRow();
     renderStructuredCodeEditor();
 }
+
+function buildNewCodeBlockTemplate(lang = "") {
+    const key = normalizeCodeLanguageKey(lang || "");
+    if (key === "html") return "\n\n<section class=\"code-block-new\">\n    \n</section>\n";
+    if (key === "css") return "\n\n.code-block-new {\n    \n}\n";
+    if (key === "javascript") return "\n\nfunction codeBlockNew() {\n    \n}\n";
+    if (key === "php") return "\n\nfunction codeBlockNew() {\n    \n}\n";
+    if (key === "python") return "\n\ndef code_block_new():\n    pass\n";
+    return "\n\n/* New code block */\n";
+}
+
+window.addCodeBlockAtEnd = function() {
+    const editor = document.getElementById("code-editor");
+    if (!codeFiles || !codeFiles.length) {
+        codeFiles = [{
+            lang: "html",
+            name: "File 1 (html)",
+            content: buildNewCodeBlockTemplate("html").trimStart()
+        }];
+        activeFileIndex = 0;
+    } else {
+        const file = codeFiles[activeFileIndex] || codeFiles[0];
+        activeFileIndex = codeFiles.indexOf(file);
+        const spacer = String(file.content || "").endsWith("\n") ? "" : "\n";
+        file.content = String(file.content || "") + spacer + buildNewCodeBlockTemplate(file.lang || file.name || "");
+    }
+    if (editor && codeFiles[activeFileIndex]) editor.value = codeFiles[activeFileIndex].content;
+    renderCodeTabs();
+    setTimeout(() => {
+        const container = document.getElementById("code-structured-editor");
+        if (container) container.scrollTop = container.scrollHeight;
+        const editors = container ? container.querySelectorAll(".code-structured-editor-input") : [];
+        const last = editors && editors.length ? editors[editors.length - 1] : null;
+        if (last) last.focus();
+        if (typeof window.refreshHtmlPreview === "function") {
+            try { window.refreshHtmlPreview(); } catch (error) {}
+        }
+    }, 80);
+    if (typeof showToast === "function") showToast(getScopedCodeText("attached"));
+};
+
+document.addEventListener("click", (event) => {
+    const trigger = event.target && event.target.closest ? event.target.closest(".code-panel-brand-icon") : null;
+    if (!trigger) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.addCodeBlockAtEnd();
+});
 
 function scheduleCodeBlockActionsRender() {
     if (codeBlockRenderTimer) clearTimeout(codeBlockRenderTimer);
@@ -953,7 +1002,12 @@ function switchTab(index) {
 
 function resetChat(silent = false) {
     if (isGenerating || window.__ISAI_MAIN_GENERATING__) stopGeneration();
-    clearCharacterChatSession();
+    if (typeof window.__isaiHardResetConversationState === "function") {
+        window.__isaiHardResetConversationState();
+    } else {
+        chatHistory = [];
+    }
+    if (typeof clearCharacterChatSession === "function") clearCharacterChatSession();
     
     chatHistory =[];
     codeFiles =[];
@@ -962,32 +1016,56 @@ function resetChat(silent = false) {
     pendingScopedCodeAttachment = null;
     
     const chatBox = document.getElementById("chat-box");
-    chatBox.style.display = "flex";
-    chatBox.style.flexDirection = "column";
-    chatBox.style.justifyContent = "normal";
-    chatBox.innerHTML = "";
+    if (chatBox) {
+        chatBox.style.display = "flex";
+        chatBox.style.flexDirection = "column";
+        chatBox.style.justifyContent = "normal";
+        chatBox.innerHTML = "";
+    }
     
     const viewId = new URLSearchParams(window.location.search).get("v");
     
-    document.getElementById("code-tabs").innerHTML = getCodePanelEmptyMarkup();
-    document.getElementById("code-editor").value = "";
+    const codeTabs = document.getElementById("code-tabs");
+    if (codeTabs) codeTabs.innerHTML = getCodePanelEmptyMarkup();
+    const codeEditor = document.getElementById("code-editor");
+    if (codeEditor) codeEditor.value = "";
     scopedCodeBlocks = [];
     renderCodeBlockActions();
     
     document.body.classList.remove("started");
     document.body.classList.remove("mode-code");
     isStarted = false;
-    document.getElementById("custom-scrollbar").style.display = "none";
+    const scrollbar = document.getElementById("custom-scrollbar");
+    if (scrollbar) scrollbar.style.display = "none";
     
     if (activeApp) exitAppMode();
     if (isMenuOpen) toggleStoreMenu();
     
-    document.getElementById("prompt-input").value = "";
+    const promptInput = document.getElementById("prompt-input");
+    if (promptInput) {
+        promptInput.value = "";
+        if (typeof handleInput === "function") handleInput(promptInput);
+    }
     setMode("chat");
     if (!silent && typeof showToast === "function") {
         showToast("Chat Reset Completed");
     }
 }
+
+window.__isaiResetChatCore = resetChat;
+
+document.addEventListener("click", (event) => {
+    const resetButton = event.target && event.target.closest ? event.target.closest("#btn-reset-chat") : null;
+    if (!resetButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (typeof window.__isaiResetChatCore === "function") {
+        window.__isaiResetChatCore(false);
+    } else if (typeof window.resetChat === "function") {
+        window.resetChat(false);
+    }
+}, true);
 
 async function processBlogImages(element) {
     if (!element) return;

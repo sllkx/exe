@@ -774,7 +774,7 @@ async function executeAction(side = "right", options = {}) {
                 ? codeFiles[pendingScopedTarget.fileIndex]
                 : {};
             overrideText = buildScopedCodeEditPrompt(pendingScopedTarget, rawInputText, fileInfo);
-            userText = normalizeChatSlashLineBreaks(rawInputText);
+            userText = normalizeChatSlashLineBreaks(overrideText);
             userBubbleText = normalizeChatSlashLineBreaks(rawInputText);
             isScopedCodeEdit = true;
             scopedTarget = pendingScopedTarget;

@@ -97,32 +97,29 @@ function isGenerationTokenCurrent(token) {
     return Number(token) > 0 && Number(token) === Number(activeGenerationToken);
 }
 
+function hardResetConversationState() {
+    beginGenerationToken();
+    if (abortController) {
+        try { abortController.abort(); } catch (error) {}
+        abortController = null;
+    }
+    stopSignal = true;
+    chatHistory = [];
+    window.__ISAI_CHAT_HISTORY_RESET_AT__ = Date.now();
+    if (Array.isArray(window.extractedCodes)) window.extractedCodes = [];
+    if (typeof clearContinueWriteContext === "function") clearContinueWriteContext();
+    setMainGeneratingState(false);
+    showLoader(false);
+}
+
+window.__isaiHardResetConversationState = hardResetConversationState;
+
 function normalizeChatSlashLineBreaks(value) {
-    return String(value ?? "")
-        .replace(/\//g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+    return String(value ?? "").trim();
 }
 
 function normalizeAssistantSlashLineBreaks(value) {
-    const source = String(value ?? "");
-    if (!source || source.indexOf("/") === -1) return source;
-
-    const placeholders = [];
-    const protectedText = source.replace(/https?:\/\/[^\s<>()]+/gi, (match) => {
-        const key = `__ISAI_URL_${placeholders.length}__`;
-        placeholders.push(match);
-        return key;
-    });
-
-    const normalized = protectedText
-        .replace(/\s*\/\s*/g, "\n")
-        .replace(/\n{3,}/g, "\n\n");
-
-    return normalized.replace(/__ISAI_URL_(\d+)__/g, (_, index) => {
-        const i = Number(index);
-        return Number.isInteger(i) && i >= 0 && i < placeholders.length ? placeholders[i] : "";
-    });
+    return String(value ?? "");
 }
 
 let currentAppPage = 1;
@@ -385,17 +382,65 @@ function sanitizeAiHtmlLocal(value) {
 
 function formatAiBubbleContent(content) {
     const raw = String(content ?? "");
-    const sanitizedRaw = sanitizeAiHtmlLocal(raw);
+    let textToProcess = raw;
+    const placeholders = [];
 
-    if (/<\/?[a-z][^>]*>/i.test(sanitizedRaw)) {
-        return sanitizedRaw;
-    }
+    // 1. 다중 라인 코드 블록 파싱 (실시간 타이핑 중 닫는 백틱이 없는 경우도 완벽 지원)
+    textToProcess = textToProcess.replace(/```[ \t]*([a-zA-Z0-9_+\-#]*)[ \t]*\n?([\s\S]*?)(?:```|$)/g, function(match, lang, code) {
+        // 코드 내부 특수문자 안전하게 치환 (HTML 깨짐 방지)
+        const escapedCode = code
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        
+        // 상단 언어 이름 표시바 UI
+        const langLabel = lang ? `<div style="font-size: 11px; color: #9ca3af; background: #2d2d2d; padding: 4px 12px; border-top-left-radius: 6px; border-top-right-radius: 6px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; border-bottom: 1px solid #3f3f46;">${lang}</div>` : '';
+        const bgRadius = lang ? '0 0 6px 6px' : '6px';
+        
+        // 코드블록 전체 박스 UI
+        const blockHtml = `
+            <div class="code-block-wrapper" style="margin: 12px 0; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 6px rgba(0,0,0,0.2); text-align: left;">
+                ${langLabel}
+                <div style="background: #1e1e1e; padding: 12px; overflow-x: auto; border-radius: ${bgRadius};">
+                    <pre style="margin: 0; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.5; color: #d4d4d4;"><code>${escapedCode}</code></pre>
+                </div>
+            </div>`;
+        
+        const key = `__CODE_BLOCK_${placeholders.length}__`;
+        placeholders.push({ key, html: blockHtml });
+        return key; // 코드가 있던 자리를 임시 키로 치환
+    });
 
-    const slashNormalized = normalizeAssistantSlashLineBreaks(sanitizedRaw);
+    // 2. 인라인 코드 파싱 (`짧은 코드`)
+    textToProcess = textToProcess.replace(/`([^`\n]+)`/g, function(match, code) {
+        const escapedCode = code
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        
+        const inlineHtml = `<code style="background: rgba(128,128,128,0.15); padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; color: #e91e63; font-weight: 500;">${escapedCode}</code>`;
+        
+        const key = `__INLINE_CODE_${placeholders.length}__`;
+        placeholders.push({ key, html: inlineHtml });
+        return key; // 인라인 코드가 있던 자리를 임시 키로 치환
+    });
 
-    return slashNormalized
-        .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
-        .replace(/\n/g, "<br>");
+    // 3. 밖으로 노출된 일반 텍스트 영역의 꺾쇠(<, >) 안전하게 치환
+    // (이 과정이 없으면 사진처럼 HTML 코드를 뱉을 때 브라우저가 고장납니다)
+    textToProcess = textToProcess
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    // 4. 일반 텍스트 영역의 엔터(줄바꿈)를 웹용 줄바꿈(<br>)으로 변환
+    textToProcess = textToProcess.replace(/\n/g, "<br>");
+
+    // 5. 임시 키로 치환해두었던 예쁜 코드블록 UI들을 원래 자리에 복구
+    placeholders.forEach(item => {
+        textToProcess = textToProcess.replace(item.key, item.html);
+    });
+
+    return textToProcess;
 }
 
 function normalizeDisplayRepeatKey(value) {

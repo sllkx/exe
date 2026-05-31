@@ -7,15 +7,21 @@ let musicTokenizer = null;
 let musicModel = null;
 let currentMode = "chat";
 let chatHistory =[];
-let wllama = null;
+let localWasmEngine = null;
 let localRuntime = localStorage.getItem((window.MODEL_CONFIG && window.MODEL_CONFIG.runtimeKey) || "ISAI_LOCAL_MODEL_RUNTIME_V1") || null;
+if (localRuntime === "wllama") localRuntime = "wasm";
 const DEFAULT_LOCAL_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q3_k_m.gguf?download=true";
-const WLLAMA_VERSION = "2.3.7";
-const WLLAMA_BASE_URL = `https://cdn.jsdelivr.net/npm/@wllama/wllama@${WLLAMA_VERSION}/esm`;
-const DEFAULT_WLLAMA_WASM_PATHS = {
-    "single-thread/wllama.wasm": `${WLLAMA_BASE_URL}/single-thread/wllama.wasm`,
-    "multi-thread/wllama.wasm": `${WLLAMA_BASE_URL}/multi-thread/wllama.wasm`
-};
+const LOCAL_WASM_VERSION = String(window.LOCAL_WASM_VERSION || "2.3.7");
+const LOCAL_WASM_BASE_URL = String(
+    window.LOCAL_WASM_BASE_URL
+    || "/cdn/vendor/local-wasm/esm"
+);
+const DEFAULT_LOCAL_WASM_PATHS = (window.LOCAL_WASM_PATHS && typeof window.LOCAL_WASM_PATHS === "object")
+    ? window.LOCAL_WASM_PATHS
+    : {
+        "single-thread/wllama.wasm": `${LOCAL_WASM_BASE_URL}/single-thread/local.wasm`,
+        "multi-thread/wllama.wasm": `${LOCAL_WASM_BASE_URL}/multi-thread/local.wasm`
+    };
 const WAITING_DOTS_SVG_URL = "https://cdn.jsdelivr.net/gh/sllkx/icons@main/icon/3-dots-bounce.svg";
 let isModelDownloaded = false;
 let isModelLoaded = false;
@@ -1055,6 +1061,7 @@ window.toggleThink = function(headerEl) {
         const hay = `${idText} ${nameText}`;
         if (hay.includes("smollm")) return "huggingface";
         if (hay.includes("huggingface")) return "huggingface";
+        if (hay.includes("vlite")) return "isai";
         if (hay.includes("gemma")) return "gemma";
         if (hay.includes("qwen")) return "qwen";
         if (hay.includes("granite")) return "granite";
@@ -1170,7 +1177,7 @@ if (typeKey === "huggingface") return `<span class="local-model-provider-badge h
                 next.fallbackUrl = catalogItem.fallbackUrl;
                 next.fallbackUrls = Array.isArray(catalogItem.fallbackUrls) ? catalogItem.fallbackUrls.slice() : [];
                 next.popupSizeText = catalogItem.popupSizeText;
-                next.preferredRuntime = catalogItem.preferredRuntime || next.preferredRuntime || "wllama";
+                next.preferredRuntime = catalogItem.preferredRuntime || next.preferredRuntime || "wasm";
                 next.license = catalogItem.license || next.license || "";
                 next.modelType = getModelTypeFromItem(catalogItem) || next.modelType || "qwen";
                 next.webllmModelId = catalogItem.webllmModelId || "";
@@ -1220,7 +1227,7 @@ function ensureShortcutMenuStyle() {
 			next.modelType = getModelTypeFromItem(next);
 			
 			// --- [추가된 부분: 모델 객체에 사용 횟수 주입] ---
-			next.usageCount = usageStats[next.id] || 0;
+			next.usageCount = next.pending || next.externalUrl ? -1 : usageStats[next.id] || 0;
 			
 			return next;
 		}).sort((a, b) => {
@@ -1278,6 +1285,12 @@ function ensureShortcutMenuStyle() {
 		const catalog = getModelCatalog();
 		if (!catalog[modelId]) return;
 		if (String(modelId) === "qwen_coder_05b_q3kl") return;
+		if (catalog[modelId].pending || catalog[modelId].externalUrl) {
+			if (catalog[modelId].externalUrl) {
+				window.open(catalog[modelId].externalUrl, "_blank", "noopener");
+			}
+			return;
+		}
 
 		// --- [추가된 부분: 자주 쓰는 모델 카운트 기록] ---
 		try {
@@ -1301,7 +1314,7 @@ function ensureShortcutMenuStyle() {
 		} else {
 			isLocalActive = true;
 			isModelLoaded = false;
-			wllama = null;
+			localWasmEngine = null;
 			if (typeof setLocalRuntimeState === "function") setLocalRuntimeState(null);
 			maybeStartActiveTierDownload(true);
 		}
@@ -1343,7 +1356,7 @@ function appendFilterRow(container, inHead) {
     const meta = getModelTypeMeta();
 
     let providerUsage = {};
-    const originalOrder = ["isai", "gemma", "huggingface", "qwen", "granite"];
+    const originalOrder = MODEL_TYPE_FILTER_ORDER.slice();
     
     try {
         const usageStats = JSON.parse(localStorage.getItem("ISAI_MODEL_USAGE_STATS") || "{}");
@@ -1396,9 +1409,13 @@ function appendFilterRow(container, inHead) {
         catalogGrid.className = "local-model-catalog-grid";
         const items = getCatalogItems().filter((item) => currentModelTypeFilter === "all" ? true : item.modelType === currentModelTypeFilter);
         items.forEach((item) => {
-            const isSelected = selectedChatModelId === item.id;
+            const isPending = !!(item.pending || item.externalUrl);
+            const isSelected = !isPending && selectedChatModelId === item.id;
             const card = document.createElement("div");
-            card.className = `local-model-catalog-card${isSelected ? " is-selected" : ""}`;
+            card.className = `local-model-catalog-card${isSelected ? " is-selected" : ""}${isPending ? " is-pending" : ""}`;
+            if (isPending && item.externalUrl) {
+                card.title = item.externalUrl;
+            }
 
             const meta = document.createElement("div");
             meta.className = "local-model-catalog-meta";
@@ -1407,9 +1424,12 @@ function appendFilterRow(container, inHead) {
             const iconWrap = document.createElement("div");
             iconWrap.className = "local-model-slot-actions";
             const providerHtml = getProviderBadgeHtml(item.modelType, true);
-            iconWrap.innerHTML = `<span class="local-model-provider-button" aria-hidden="true">${providerHtml}</span><span class="local-model-size-pill">${item.popupSizeText || ""}</span>`;
+            const pendingText = item.popupSizeText || "\uC900\uBE44\uC911";
+            iconWrap.innerHTML = isPending
+                ? `<span class="local-model-pending-icon" aria-hidden="true"><i class="ri-time-line"></i></span><span class="local-model-size-pill is-pending">${pendingText}</span>`
+                : `<span class="local-model-provider-button" aria-hidden="true">${providerHtml}</span><span class="local-model-size-pill">${item.popupSizeText || ""}</span>`;
 
-            if (shortcutSettingsOpen) {
+            if (shortcutSettingsOpen && !isPending) {
                 const assignRow = document.createElement("div");
                 assignRow.className = "local-model-assign-row";
                 SLOT_ORDER.forEach((slotKey) => {
@@ -1437,6 +1457,10 @@ function appendFilterRow(container, inHead) {
             card.addEventListener("click", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
+                if (isPending && item.externalUrl) {
+                    window.open(item.externalUrl, "_blank", "noopener");
+                    return;
+                }
                 handleShortcutProfileChange(activeTier, item.id, {
                     activateNow: false,
                     showChangedToast: false
@@ -1471,7 +1495,7 @@ function appendFilterRow(container, inHead) {
                 ? (currentProfiles[slotKey] ? currentProfiles[slotKey].modelId : "")
                 : selectedChatModelId;
 
-            catalogItems.forEach((item) => {
+            catalogItems.filter((item) => !(item.pending || item.externalUrl)).forEach((item) => {
                 const option = document.createElement("option");
                 option.value = item.id;
                 option.textContent = item.name;
@@ -1569,7 +1593,7 @@ function appendFilterRow(container, inHead) {
         applyLocalModelProfileToConfig();
         isLocalActive = true;
         isModelLoaded = false;
-        wllama = null;
+        localWasmEngine = null;
         if (typeof setLocalRuntimeState === "function") setLocalRuntimeState(null);
         isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
         updateLocalBtnState();

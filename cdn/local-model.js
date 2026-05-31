@@ -24,14 +24,14 @@ function nextLocalInferenceRunId() {
 }
 
 function terminateLocalRuntime(options = {}) {
-    const runtime = wllama;
+    const runtime = localWasmEngine;
     const shouldReset = !!(options && options.reset);
     window.__ISAI_LOCAL_RUNTIME_STOPPING__ = true;
     nextLocalInferenceRunId();
     if (!runtime) {
         if (shouldReset) {
             isModelLoaded = false;
-            wllama = null;
+            localWasmEngine = null;
             if (typeof setLocalRuntimeState === "function") setLocalRuntimeState(null);
         }
         return;
@@ -47,7 +47,7 @@ function terminateLocalRuntime(options = {}) {
     }
     if (shouldReset) {
         isModelLoaded = false;
-        wllama = null;
+        localWasmEngine = null;
         if (typeof setLocalRuntimeState === "function") setLocalRuntimeState(null);
     }
 }
@@ -1976,19 +1976,19 @@ function getLocalModelProfiles() {
             label: "Light",
             fallbackUrl: "",
             popupSizeText: "257MB",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         },
         middle: {
             key: "middle",
             label: "Middle",
             fallbackUrl: "",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         },
         hard: {
             key: "hard",
             label: "Hard",
             fallbackUrl: "",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         }
     };
 }
@@ -2026,14 +2026,32 @@ function getLocalModelProfileUrl(profile) {
     return String(profile.fallbackUrl || profile.url || profile.modelUrl || "").trim();
 }
 
-function resolveWllamaWasmPaths() {
+function resolveLocalWasmPaths() {
     const configured = window.MODEL_CONFIG && window.MODEL_CONFIG.fallback && window.MODEL_CONFIG.fallback.wasmPaths;
     if (configured && typeof configured === "object") {
         const single = String(configured["single-thread/wllama.wasm"] || "").trim();
         const multi = String(configured["multi-thread/wllama.wasm"] || "").trim();
         if (single && multi) return configured;
     }
-    return { ...DEFAULT_WLLAMA_WASM_PATHS };
+    const bundled = (typeof DEFAULT_LOCAL_WASM_PATHS !== "undefined" && DEFAULT_LOCAL_WASM_PATHS)
+        || window.LOCAL_WASM_PATHS
+        || null;
+    if (bundled && typeof bundled === "object") {
+        const single = String(bundled["single-thread/wllama.wasm"] || "").trim();
+        const multi = String(bundled["multi-thread/wllama.wasm"] || "").trim();
+        if (single && multi) return { ...bundled };
+    }
+    const baseUrl = String(window.LOCAL_WASM_BASE_URL || "/cdn/vendor/local-wasm/esm").trim();
+    if (baseUrl) {
+        return {
+            "single-thread/wllama.wasm": `${baseUrl}/single-thread/local.wasm`,
+            "multi-thread/wllama.wasm": `${baseUrl}/multi-thread/local.wasm`
+        };
+    }
+    return {
+        "single-thread/wllama.wasm": "/cdn/vendor/local-wasm/esm/single-thread/local.wasm",
+        "multi-thread/wllama.wasm": "/cdn/vendor/local-wasm/esm/multi-thread/local.wasm"
+    };
 }
 
 function applyLocalModelProfileToConfig() {
@@ -2050,8 +2068,8 @@ function applyLocalModelProfileToConfig() {
     } else {
         delete modelConfig.fallback.urls;
     }
-    modelConfig.fallback.wasmPaths = resolveWllamaWasmPaths();
-    modelConfig.preferredRuntime = "wllama";
+    modelConfig.fallback.wasmPaths = resolveLocalWasmPaths();
+    modelConfig.preferredRuntime = "wasm";
     modelConfig.webllm = null;
     modelConfig.activeModelId = profile.modelId || "";
     modelConfig.activeModelName = profile.modelName || "";
@@ -2240,7 +2258,7 @@ function setLocalModelTier(tierKey) {
 
     isLocalActive = wasLocalActive;
     isModelLoaded = false;
-    wllama = null;
+    localWasmEngine = null;
     setLocalRuntimeState(null);
     isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
 
@@ -2293,7 +2311,7 @@ function normalizeLocalModelProfile(tierKey, rawProfile) {
             key,
             label: defaultLabel,
             fallbackUrl: String(rawProfile).trim(),
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         };
     }
 
@@ -2308,7 +2326,7 @@ function normalizeLocalModelProfile(tierKey, rawProfile) {
         normalized.popupSizeText = String(normalized.sizeText).trim();
     }
     if (!normalized.preferredRuntime) {
-        normalized.preferredRuntime = "wllama";
+        normalized.preferredRuntime = "wasm";
     }
     return normalized;
 }
@@ -2360,28 +2378,28 @@ function getLocalModelProfiles() {
             label: "\ucf54\ub4dc",
             fallbackUrl: DEFAULT_LOCAL_MODEL_URL,
             popupSizeText: "369MB",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         },
         light: {
             key: "light",
             label: "\ub77c\uc774\ud2b8",
             fallbackUrl: DEFAULT_LOCAL_MODEL_URL,
             popupSizeText: "429MB",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         },
         middle: {
             key: "middle",
             label: "\uc911\uac04",
             fallbackUrl: DEFAULT_LOCAL_MODEL_URL,
             popupSizeText: "592MB",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         },
         hard: {
             key: "hard",
             label: "\ud558\ub4dc",
             fallbackUrl: DEFAULT_LOCAL_MODEL_URL,
             popupSizeText: "558MB",
-            preferredRuntime: "wllama"
+            preferredRuntime: "wasm"
         }
     });
 }
@@ -2459,7 +2477,7 @@ function setLocalModelTier(tierKey) {
 
     isLocalActive = wasLocalActive;
     isModelLoaded = false;
-    wllama = null;
+    localWasmEngine = null;
     setLocalRuntimeState(null);
     isModelDownloaded = localStorage.getItem(getLocalDownloadStorageKey()) === "true";
 
@@ -2566,7 +2584,7 @@ function handleLocalToggle() {
 }
 
 function setLocalRuntimeState(runtimeName) {
-    localRuntime = runtimeName || null;
+    localRuntime = runtimeName === "wllama" ? "wasm" : (runtimeName || null);
     window.ISAI_LOCAL_RUNTIME = localRuntime;
     if (localRuntime) {
         localStorage.setItem(getLocalRuntimeStorageKey(), localRuntime);
@@ -2695,41 +2713,83 @@ function isIgnorableAssistantGreeting(text) {
     return candidates.includes(normalized);
 }
 
-async function loadWllamaFallbackEngine(container, bar) {
+function getLocalWasmThreadCount() {
+    const configured = Number(window.MODEL_CONFIG && window.MODEL_CONFIG.localWasmThreads);
+    if (Number.isFinite(configured) && configured > 0) return Math.max(1, Math.floor(configured));
+    const canThread = typeof SharedArrayBuffer !== "undefined" && !!window.crossOriginIsolated;
+    if (!canThread) return 1;
+    const cores = Number(navigator.hardwareConcurrency || 4);
+    return Math.max(2, Math.min(6, Math.floor(cores > 2 ? cores - 1 : cores)));
+}
+
+function getLocalWasmSpeedPreset() {
     const modelConfig = window.MODEL_CONFIG || {};
-    const fallbackConfig = modelConfig.fallback || {};
-    const { Wllama, LoggerWithoutDebug } = window.WllamaObj || {};
-    if (!fallbackConfig.wasmPaths) {
-        fallbackConfig.wasmPaths = resolveWllamaWasmPaths();
-        modelConfig.fallback = fallbackConfig;
-        window.MODEL_CONFIG = modelConfig;
-    }
-    if (!Wllama) {
-        throw new Error("Wllama runtime is not available.");
-    }
-    if (!fallbackConfig.url || !fallbackConfig.wasmPaths) {
-        throw new Error("Local model configuration is missing.");
-    }
+    const presets = modelConfig.speedPresets || window.__ISAI_LOCAL_SPEED_PRESETS || {};
+    const tier = getActiveLocalModelTier();
+    if (presets && presets[tier]) return presets[tier];
+    if (presets && presets.light) return presets.light;
+    return null;
+}
 
-    if (wllama && isModelLoaded) {
-        return wllama;
-    }
-
-    if (!wllama) {
-        wllama = new Wllama(fallbackConfig.wasmPaths, { logger: LoggerWithoutDebug });
-    }
-
-    await wllama.loadModelFromUrl(fallbackConfig.url, {
+function getLocalWasmLoadOptions(container, bar) {
+    const preset = getLocalWasmSpeedPreset();
+    const configuredCtx = Number(window.MODEL_CONFIG && window.MODEL_CONFIG.localWasmContextSize);
+    const presetCtx = Number(preset && preset.maxSeqLen);
+    const nCtx = Number.isFinite(configuredCtx) && configuredCtx > 0
+        ? Math.floor(configuredCtx)
+        : Math.min(Number.isFinite(presetCtx) && presetCtx > 0 ? presetCtx : 1024, 1024);
+    return {
+        n_threads: getLocalWasmThreadCount(),
+        n_ctx: nCtx,
         progressCallback: ({ loaded, total }) => {
             if (container) container.classList.remove("hidden");
             if (total) {
                 updateLocalProgress(bar, loaded / total);
             }
         }
-    });
+    };
+}
 
-    setLocalRuntimeState("wllama");
-    return wllama;
+function getLocalWasmSamplingOptions() {
+    const preset = getLocalWasmSpeedPreset();
+    if (preset && preset.sampling && typeof preset.sampling === "object") {
+        return { ...preset.sampling };
+    }
+    return { temp: 0.7, top_k: 40, top_p: 0.9 };
+}
+
+async function loadLocalWasmEngine(container, bar) {
+    const modelConfig = window.MODEL_CONFIG || {};
+    const fallbackConfig = modelConfig.fallback || {};
+    const { LlamaEngine, LoggerWithoutDebug } = window.LocalWasmLlamaObj || {};
+    if (!fallbackConfig.wasmPaths) {
+        fallbackConfig.wasmPaths = resolveLocalWasmPaths();
+        modelConfig.fallback = fallbackConfig;
+        window.MODEL_CONFIG = modelConfig;
+    }
+    if (!LlamaEngine) {
+        throw new Error("Local WASM runtime is not available.");
+    }
+    if (!fallbackConfig.url || !fallbackConfig.wasmPaths) {
+        throw new Error("Local model configuration is missing.");
+    }
+
+    if (localWasmEngine && isModelLoaded) {
+        return localWasmEngine;
+    }
+
+    if (!localWasmEngine) {
+        localWasmEngine = new LlamaEngine(fallbackConfig.wasmPaths, {
+            logger: LoggerWithoutDebug,
+            allowOffline: true,
+            parallelDownloads: 4
+        });
+    }
+
+    await localWasmEngine.loadModelFromUrl(fallbackConfig.url, getLocalWasmLoadOptions(container, bar));
+
+    setLocalRuntimeState("wasm");
+    return localWasmEngine;
 }
 
 async function startDownload() {
@@ -2741,7 +2801,7 @@ async function startDownload() {
     try {
         container.classList.remove("hidden");
         updateLocalProgress(bar, 0);
-        await loadWllamaFallbackEngine(container, bar);
+        await loadLocalWasmEngine(container, bar);
 
         isModelDownloaded = true;
         isModelLoaded = true;
@@ -2785,15 +2845,15 @@ async function runLocalInference(promptArr, callback, generationToken = null) {
     );
     const messages = mapPromptMessagesForLocalEngine(promptArr);
     if (!messages.length) return;
-    if (!wllama || !isCurrentLocalRun()) return;
-    const runtime = wllama;
+    if (!localWasmEngine || !isCurrentLocalRun()) return;
+    const runtime = localWasmEngine;
     const formatted = await runtime.formatChat(messages, true);
     if (!isCurrentLocalRun()) return;
     let streamedText = "";
     let resultText = "";
     try {
         resultText = await runtime.createCompletion(formatted, {
-            sampling: { temp: 0.7, top_k: 40, top_p: 0.9 },
+            sampling: getLocalWasmSamplingOptions(),
             signal: localAbortController ? localAbortController.signal : undefined,
             onNewToken: (token, piece, currentText) => {
                 if (!isCurrentLocalRun()) return false;

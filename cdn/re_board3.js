@@ -313,29 +313,17 @@ document.addEventListener('alpine:init', () => {
         sortItemsByInterest(tb, l) { 
             if (!Array.isArray(l) || l.length < 2) return l;
 
-            const catMap = { store: this.selectedStoreCategory, gallery: this.selectedGalleryCategory, forum: this.selectedForumCategory, code: this.selectedCodeCategory };
-            const targetKey = (tb === 'news' ? this.selectedNewsCategoryQ : catMap[tb])?.toLowerCase() || '';
-
             return [...l].sort((a, b) => {
-                const tierA = this.calculateItemTier(tb, a, targetKey);
-                const tierB = this.calculateItemTier(tb, b, targetKey);
-                if (tierA !== tierB) return tierB - tierA; 
-
-                const scoreA = tb === 'products' ? this.scoreProduct(a) : this.scoreByInterestBase(tb, a);
-                const scoreB = tb === 'products' ? this.scoreProduct(b) : this.scoreByInterestBase(tb, b);
-                if (scoreA !== scoreB) return scoreB - scoreA; 
-                
-                const timeA = Date.parse(a.date || a.created_at || '') || 0;
-                const timeB = Date.parse(b.date || b.created_at || '') || 0;
+                const timeA = Date.parse(a?.date || a?.created_at || '') || 0;
+                const timeB = Date.parse(b?.date || b?.created_at || '') || 0;
                 if (timeA !== timeB) return timeB - timeA;
 
-                const getId = x => x.id ? Number(x.id) : (x.link ? parseInt(String(x.link).replace(/\D/g, '').slice(0,8)) : 0);
+                const getId = x => x?.id ? Number(x.id) : (x?.link ? parseInt(String(x.link).replace(/\D/g, '').slice(0,8)) : 0);
                 return getId(b) - getId(a);
             }); 
         },
         
         applyInterestSort(tb){ 
-            if(tb === 'news') return; 
             if(['store','code','forum','gallery','products'].includes(tb)) {
                 this.items[tb] = [...this.sortItemsByInterest(tb, this.items[tb])]; 
             }
@@ -347,7 +335,7 @@ document.addEventListener('alpine:init', () => {
             const k = `${tb}_${uid}`;
             this.itemProfile[k] = Math.min(1000, (this.itemProfile[k] || 0) + 1);
             localStorage.setItem('isai_item_profile_v1', JSON.stringify(this.itemProfile));
-            setTimeout(() => { if (this.items[tb]?.length) { this.applyInterestSort(tb); this.updateMacy(tb); } }, 300);
+            setTimeout(() => { if (this.items[tb]?.length) { this.updateMacy(tb); } }, 300);
         },
         trackInterest(tb, i, w=1){ 
             const text = String(`${i?.title||''} ${i?.cleanTitle||''} ${i?.content||''} ${i?.snippet||''} ${i?.listText||''} ${i?.prompt||''} ${i?.category||''} ${i?.keywords||''} ${i?.description||''} ${i?.source||''}`).toLowerCase();
@@ -379,23 +367,30 @@ document.addEventListener('alpine:init', () => {
         },
         getVisibleProducts(){
             const limit = this.isProductSearchMode() ? 24 : 3;
-            return Array.isArray(this.items.products) 
-                ? this.items.products.slice().sort((a,b)=>this.scoreProduct(b)-this.scoreProduct(a)||(Number(b.id||0)-Number(a.id||0))).slice(0,limit)
+            return Array.isArray(this.items.products)
+                ? [...this.items.products]
+                    .sort((a, b) => {
+                        const timeA = Date.parse(a?.created_at || a?.date || '') || 0;
+                        const timeB = Date.parse(b?.created_at || b?.date || '') || 0;
+                        if (timeA !== timeB) return timeB - timeA;
+                        return Number(b?.id || 0) - Number(a?.id || 0);
+                    })
+                    .slice(0, limit)
                 : [];
         },
-        getVisibleNewsItems(){ return Array.isArray(this.items.news) ? this.items.news :[]; },
+        getVisibleNewsItems(){ return Array.isArray(this.items.news) ? [...this.items.news].sort((a,b)=> (Date.parse(b?.date || b?.created_at || '') || 0) - (Date.parse(a?.date || a?.created_at || '') || 0) || ((Number(b?.id||0) || 0) - (Number(a?.id||0) || 0))) :[]; },
 
         getMixedItems(tb) {
             const visibleItems = tb === 'news' ? this.getVisibleNewsItems() : (this.items[tb] || []);
             if (!visibleItems.length) return [];
             
             const original = visibleItems.map((item, idx) => ({type: tb, item, key: `${tb}-${item.id || item.link || idx}`}));
-            const products = this.getVisibleProducts().map((item) => ({type: 'product', item, key: `product-${item.id}`, score: this.scoreProduct(item)}));
+            const products = this.getVisibleProducts().map((item) => ({type: 'product', item, key: `product-${item.id}`}));
             
-            if (!products.length) return original;
+            if (!products.length || ['news', 'forum', 'store'].includes(tb)) return original;
             
             const out = [];
-            let pQueue = [...products].sort((a, b) => b.score - a.score);
+            let pQueue = [...products];
             const isSearch = this.isProductSearchMode();
             
             // 시드 기반 난수 생성 (화면 깜빡임 완벽 방지)
@@ -446,7 +441,6 @@ document.addEventListener('alpine:init', () => {
                 this.items.gallery=[];
                 this.loadData('gallery');
             } else {
-                this.applyInterestSort('gallery');
                 this.updateMacy('gallery');
             }
             this.loadSearchProducts();
@@ -456,7 +450,7 @@ document.addEventListener('alpine:init', () => {
 
         setForumCat(c){
             this.selectedForumCategory = c.key; this.forumQuery = ''; 
-            this.applyInterestSort('forum'); this.updateMacy('forum');
+            this.updateMacy('forum');
             document.getElementById('forum-search-input').value=''; toggleForumSearchMode(false);
             this.page.forum=1; this.end.forum=false; this.items.forum=[]; this.loadData('forum'); this.loadSearchProducts();
         },
@@ -465,7 +459,7 @@ document.addEventListener('alpine:init', () => {
 
         setStoreCat(c){
             this.selectedStoreCategory = c.key; this.storeQuery = '';
-            this.applyInterestSort('store'); this.updateMacy('store');
+            this.updateMacy('store');
             document.getElementById('store-search-input').value=''; toggleStoreSearchMode(false);
             this.page.store=1; this.end.store=false; this.items.store=[]; this.loadData('store'); this.loadSearchProducts();
         },
@@ -476,7 +470,7 @@ document.addEventListener('alpine:init', () => {
             this.selectedNewsCategoryQ = this.newsQuery = c.q; 
             this.syncMarketWidgetMode(true); window.history.replaceState({},'','/'); 
             this.items.news =[]; this.items.products =[]; 
-            this.applyInterestSort('news'); this.updateMacy('news');
+            this.updateMacy('news');
             document.getElementById('news-search-input').value=''; toggleNewsSearchMode(false); 
             this.page.news=1; this.end.news=false; this.loadData('news'); this.loadSearchProducts(); 
         },
@@ -485,23 +479,23 @@ document.addEventListener('alpine:init', () => {
         
         setCodeCat(c){ 
             this.selectedCodeCategory = c.key; this.codeQuery = '';
-            this.applyInterestSort('code'); this.updateMacy('code');
+            this.updateMacy('code');
             document.getElementById('code-search-input').value=''; toggleCodeSearchMode(false); 
             this.page.code=1; this.end.code=false; this.items.code=[]; this.loadData('code'); this.loadSearchProducts();
         },
         submitCodeSearch(k){ this.codeQuery=String(k||'').trim(); this.selectedCodeCategory=''; this.items.code=[]; this.page.code=1; this.end.code=false; this.loadData('code'); this.loadSearchProducts(); },
         resetCodeCategory(){ this.selectedCodeCategory='all'; this.codeQuery=''; document.getElementById('code-search-input').value=''; toggleCodeSearchMode(false); this.items.code=[]; this.page.code=1; this.end.code=false; this.loadData('code'); this.loadSearchProducts(); },
 
-        openStoreItem(i){ if(i){ this.trackItem('store', i); this.trackInterest('store',i,2); const appId = i.id || i.app_id || i.appId; if(appId && typeof window.runApp==='function') window.runApp(appId); } },
-        openForumItem(i){ if(i){ this.trackItem('forum', i); this.trackInterest('forum',i,2); window.location.href='https://isai.kr/view/'+i.id; } },
-        openNewsGate(i){ if(i?.link){ this.trackItem('news', i); this.trackInterest('news',i,3); window.location.href=`/news_gate/?u=${encodeURIComponent(i.link)}&t=${encodeURIComponent(i.cleanTitle||i.title||'News')}&s=${encodeURIComponent(i.snippet||'')}`; } },
-        openProduct(i){ if(i){ this.trackItem('products', i); this.trackInterest('products',i,3); this.productProfile[i.id]=Number(this.productProfile[i.id]||0)+1; localStorage.setItem('isai_product_profile_v1',JSON.stringify(this.productProfile)); if(i.link_url) window.open(i.link_url,'_blank','noopener'); } },
-        async openCodeItem(i){ if(!i)return; this.trackItem('code', i); this.trackInterest('code',i,2); if(i.id){ window.location.href='/play_run/?id='+i.id; return; } if(i.run_url)window.open(i.run_url,'_blank','noopener'); else if(i.gist_url)window.open(i.gist_url,'_blank','noopener'); },
+        openStoreItem(i){ if(i){ this.trackItem('store', i); const appId = i.id || i.app_id || i.appId; if(appId && typeof window.runApp==='function') window.runApp(appId); } },
+        openForumItem(i){ if(i){ this.trackItem('forum', i); window.location.href='https://isai.kr/view/'+i.id; } },
+        openNewsGate(i){ if(i?.link){ this.trackItem('news', i); window.location.href=`/news_gate/?u=${encodeURIComponent(i.link)}&t=${encodeURIComponent(i.cleanTitle||i.title||'News')}&s=${encodeURIComponent(i.snippet||'')}`; } },
+        openProduct(i){ if(i){ this.trackItem('products', i); if(i.link_url) window.open(i.link_url,'_blank','noopener'); } },
+        async openCodeItem(i){ if(!i)return; this.trackItem('code', i); if(i.id){ window.location.href='/play_run/?id='+i.id; return; } if(i.run_url)window.open(i.run_url,'_blank','noopener'); else if(i.gist_url)window.open(i.gist_url,'_blank','noopener'); },
         openCodeComposer(){ window.scrollTo({top:0,behavior:'smooth'}); if(typeof window.setMode==='function')window.setMode('code'); },
         
         openGalleryItem(i){ 
             if(i){ 
-                this.trackItem('gallery', i); this.trackInterest('gallery',i,2); 
+                this.trackItem('gallery', i); 
                 fetch('re_store.php?action=increase_view&id='+i.id).catch(e=>{}); 
                 this.galleryModal.item = i; this.galleryModal.open = true;
                 window.__RE_BOARD3_SHARE_CONTEXT__ = buildGalleryShareContext(i);
@@ -516,7 +510,7 @@ document.addEventListener('alpine:init', () => {
 
         async openCharacterChat(i) {
             if(!i?.image_url) return; 
-            this.trackItem('gallery', i); this.trackInterest('gallery', i, 3); 
+            this.trackItem('gallery', i); 
             this.closeGalleryModal();
             document.body.classList.remove('is-store-menu-open');
             const p = String(i.content || i.prompt || i.title || '').replace(/2x2\s*grid/gi, '').replace(/\s+/g, ' ').trim();
@@ -531,7 +525,7 @@ document.addEventListener('alpine:init', () => {
         getSortedStoreCategories(){ return this.storeCategories.slice(); },
         getSortedCodeCategories(){ return this.codeCategories.slice(); },
 
-        refreshInterestLayout(t){ this.applyInterestSort(t); this.$nextTick(() => { this.updateMacy(t); setTimeout(() => { this.updateMacy(t); }, 150); }); },
+        refreshInterestLayout(t){ this.$nextTick(() => { this.updateMacy(t); setTimeout(() => { this.updateMacy(t); }, 150); }); },
         async warmupAiPool(t){ if(t!=='gallery'||this.warmupDone[t])return; this.warmupDone[t]=true; for(let i=0;i<2&&!this.end[t];i++)await this.loadData(t); this.refreshInterestLayout(t); this.initialInterestSortDone[t]=true; },
 
         // =========================================================================
@@ -641,7 +635,6 @@ document.addEventListener('alpine:init', () => {
                 const r = await fetch(`/re_products.php?action=list_products&q=${encodeURIComponent(q)}&limit=${productLimit}&lang=${encodeURIComponent(lang)}`);
                 const j = await r.json();
                 this.items.products = Array.isArray(j?.data) ? j.data :[];
-                this.applyInterestSort('products');
                 this.$nextTick(()=>this.updateMacy(this.curTab));
             }catch(e){ this.items.products=[]; }
         },

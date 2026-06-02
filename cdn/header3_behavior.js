@@ -615,6 +615,15 @@
 
         function setMode(mode) {
             mode = mode || 'chat';
+            if (mode === 'chat' && !window.ISAI_CHAT_PAGE) {
+                const redirectUrl = new URL('/chat.php', window.location.origin);
+                try {
+                    const cdnMode = new URL(window.location.href).searchParams.get('jsdelivr');
+                    if (cdnMode !== null) redirectUrl.searchParams.set('jsdelivr', cdnMode);
+                } catch (error) {}
+                window.location.href = redirectUrl.toString();
+                return;
+            }
             if (mode !== 'chat' && typeof window.clearCharacterChatSession === 'function') {
                 try { window.clearCharacterChatSession(); } catch (error) {}
             }

@@ -180,7 +180,7 @@ document.addEventListener('alpine:init', () => {
             }
             if(this.supportsHeatmapMode()){ this.marketHeatmapActive=true; this.$nextTick(()=>this.renderMarketHeatmapWidget(fReset||pM!==this.marketMode)); }
         },
-        shouldShowMarketWidget(){ return this.curTab==='news'&&!!this.marketMode; },
+        shouldShowMarketWidget(){ return false; },
         supportsHeatmapMode(m=null){ return (m||this.marketMode)==='stocks'||(m||this.marketMode)==='crypto'; },
         shouldShowHeatmapWidget(){ return this.supportsHeatmapMode()&&this.marketHeatmapActive; },
         getActiveMarketSymbols(){ return this.marketSymbolCatalog[this.marketMode]||[]; },
@@ -198,22 +198,24 @@ document.addEventListener('alpine:init', () => {
         renderMarketHeatmapWidget(f=false){
             if(!this.supportsHeatmapMode())return; const h=this.$refs.marketHeatmapWidget, m=String(this.marketMode||''); if(!h||(!f&&h.dataset.loaded==='1'&&h.dataset.mode===m))return;
             h.innerHTML=''; h.dataset.loaded='0'; h.dataset.mode=m;
-            const wrap = document.createElement('div');
-            wrap.className = 'tradingview-widget-container market-heatmap-container';
-            const widget = document.createElement('div');
-            widget.className = 'tradingview-widget-container__widget market-heatmap-widget';
-            wrap.appendChild(widget);
-            let scr=document.createElement('script'); scr.type='text/javascript'; scr.async=true;
-            if(m==='crypto'){
-                scr.src='https://s3.tradingview.com/external-embedding/embed-widget-crypto-coins-heatmap.js';
-                scr.text=JSON.stringify({dataSource:'Crypto',blockSize:'market_cap_calc',blockColor:'24h_close_change|5',locale:this.cryptoHeatmapLocale||'en',colorTheme:'dark',hasTopBar:false,isDataSetEnabled:false,isZoomEnabled:true,hasSymbolTooltip:true,width:'100%',height:'100%'});
-            } else {
-                scr.src='https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js';
-                scr.text=JSON.stringify({exchanges:[],dataSource:this.marketHeatmapSource||'SPX500',blockSize:'market_cap_basic',blockColor:'change',grouping:'sector',locale:this.marketHeatmapLocale||'en',colorTheme:'dark',hasTopBar:false,isDataSetEnabled:false,isZoomEnabled:true,hasSymbolTooltip:true,width:'100%',height:'100%'});
-            }
-            scr.onload=()=>{h.dataset.loaded='1'; h.dataset.mode=m; this.$nextTick(()=>this.fixMarketHeatmapHeight());};
-            wrap.appendChild(scr);
-            h.appendChild(wrap);
+            const iframe = document.createElement('iframe');
+            const params = new URLSearchParams({
+                mode: 'heatmap',
+                marketMode: m,
+                locale: this.marketHeatmapLocale || (m === 'crypto' ? this.cryptoHeatmapLocale || 'en' : 'en'),
+                source: this.marketHeatmapSource || 'SPX500'
+            });
+            iframe.src = `/tradingview_frame.php?${params.toString()}`;
+            iframe.loading = 'lazy';
+            iframe.title = 'TradingView heatmap';
+            iframe.referrerPolicy = 'no-referrer-when-downgrade';
+            iframe.style.width = '100%';
+            iframe.style.height = '100%';
+            iframe.style.minHeight = '100%';
+            iframe.style.border = '0';
+            iframe.style.display = 'block';
+            iframe.onload=()=>{h.dataset.loaded='1'; h.dataset.mode=m; this.$nextTick(()=>this.fixMarketHeatmapHeight());};
+            h.appendChild(iframe);
             setTimeout(()=>this.fixMarketHeatmapHeight(), 600);
             setTimeout(()=>this.fixMarketHeatmapHeight(), 1600);
         },
@@ -227,7 +229,7 @@ document.addEventListener('alpine:init', () => {
                 el.style.display='block';
             });
         },
-        getTradingViewChartUrl(){ const fb={stocks:'SP:SPX',gold:'OANDA:XAUUSD',crypto:'BINANCE:BTCUSDT',commodities:'TVC:USOIL'}[this.marketMode]||'SP:SPX'; return `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(this.selectedMarketSymbol||fb)}&interval=60&hidesidetoolbar=1&symboledit=1&saveimage=0&toolbarbg=111111&theme=dark&style=1&timezone=Asia%2FSeoul&withdateranges=1&hideideas=1`; },
+        getTradingViewChartUrl(){ const fb={stocks:'SP:SPX',gold:'OANDA:XAUUSD',crypto:'BINANCE:BTCUSDT',commodities:'TVC:USOIL'}[this.marketMode]||'SP:SPX'; const params=new URLSearchParams({mode:'chart',marketMode:this.marketMode||'stocks',symbol:this.selectedMarketSymbol||fb}); return `/tradingview_frame.php?${params.toString()}`; },
 
         // =========================================================================
         // [강력 최적화] AI 절대 티어(Tier) 시스템 
@@ -310,10 +312,28 @@ document.addEventListener('alpine:init', () => {
             return s;
         },
 
+        getInterestSortTargetKey(tb) {
+            if (tb === 'gallery') return this.selectedGalleryCategory || 'all';
+            if (tb === 'forum') return this.selectedForumCategory || 'all';
+            if (tb === 'store') return this.selectedStoreCategory || 'all';
+            if (tb === 'code') return this.selectedCodeCategory || 'all';
+            if (tb === 'news') return this.selectedNewsCategoryQ || '';
+            return 'all';
+        },
+
         sortItemsByInterest(tb, l) { 
             if (!Array.isArray(l) || l.length < 2) return l;
 
+            const targetKey = this.getInterestSortTargetKey(tb);
             return [...l].sort((a, b) => {
+                const tierA = this.calculateItemTier(tb, a, targetKey);
+                const tierB = this.calculateItemTier(tb, b, targetKey);
+                if (tierA !== tierB) return tierB - tierA;
+
+                const scoreA = this.scoreByInterestBase(tb, a) + Number(a?.sort_order || 0);
+                const scoreB = this.scoreByInterestBase(tb, b) + Number(b?.sort_order || 0);
+                if (scoreA !== scoreB) return scoreB - scoreA;
+
                 const timeA = Date.parse(a?.date || a?.created_at || '') || 0;
                 const timeB = Date.parse(b?.date || b?.created_at || '') || 0;
                 if (timeA !== timeB) return timeB - timeA;
@@ -387,7 +407,7 @@ document.addEventListener('alpine:init', () => {
             const original = visibleItems.map((item, idx) => ({type: tb, item, key: `${tb}-${item.id || item.link || idx}`}));
             const products = this.getVisibleProducts().map((item) => ({type: 'product', item, key: `product-${item.id}`}));
             
-            if (!products.length || ['news', 'forum', 'store'].includes(tb)) return original;
+            if (!products.length) return original;
             
             const out = [];
             let pQueue = [...products];
@@ -441,6 +461,7 @@ document.addEventListener('alpine:init', () => {
                 this.items.gallery=[];
                 this.loadData('gallery');
             } else {
+                this.applyInterestSort('gallery');
                 this.updateMacy('gallery');
             }
             this.loadSearchProducts();
@@ -450,18 +471,22 @@ document.addEventListener('alpine:init', () => {
 
         setForumCat(c){
             this.selectedForumCategory = c.key; this.forumQuery = ''; 
-            this.updateMacy('forum');
             document.getElementById('forum-search-input').value=''; toggleForumSearchMode(false);
-            this.page.forum=1; this.end.forum=false; this.items.forum=[]; this.loadData('forum'); this.loadSearchProducts();
+            this.page.forum=1; this.end.forum=false; this.items.forum=[];
+            this.applyInterestSort('forum');
+            this.updateMacy('forum');
+            this.loadData('forum'); this.loadSearchProducts();
         },
         submitForumSearch(k){ this.forumQuery=String(k||'').trim(); this.selectedForumCategory=''; this.items.forum=[]; this.page.forum=1; this.end.forum=false; this.loadData('forum'); this.loadSearchProducts(); },
         resetForumCategory(){ this.selectedForumCategory='all'; this.forumQuery=''; document.getElementById('forum-search-input').value=''; toggleForumSearchMode(false); this.items.forum=[]; this.page.forum=1; this.end.forum=false; this.loadData('forum'); this.loadSearchProducts(); },
 
         setStoreCat(c){
             this.selectedStoreCategory = c.key; this.storeQuery = '';
-            this.updateMacy('store');
             document.getElementById('store-search-input').value=''; toggleStoreSearchMode(false);
-            this.page.store=1; this.end.store=false; this.items.store=[]; this.loadData('store'); this.loadSearchProducts();
+            this.page.store=1; this.end.store=false; this.items.store=[];
+            this.applyInterestSort('store');
+            this.updateMacy('store');
+            this.loadData('store'); this.loadSearchProducts();
         },
         submitStoreSearch(k){ this.storeQuery=String(k||'').trim(); this.selectedStoreCategory=''; this.items.store=[]; this.page.store=1; this.end.store=false; this.loadData('store'); this.loadSearchProducts(); },
         resetStoreCategory(){ this.selectedStoreCategory='all'; this.storeQuery=''; document.getElementById('store-search-input').value=''; toggleStoreSearchMode(false); this.items.store=[]; this.page.store=1; this.end.store=false; this.loadData('store'); this.loadSearchProducts(); },
@@ -479,22 +504,25 @@ document.addEventListener('alpine:init', () => {
         
         setCodeCat(c){ 
             this.selectedCodeCategory = c.key; this.codeQuery = '';
-            this.updateMacy('code');
             document.getElementById('code-search-input').value=''; toggleCodeSearchMode(false); 
-            this.page.code=1; this.end.code=false; this.items.code=[]; this.loadData('code'); this.loadSearchProducts();
+            this.page.code=1; this.end.code=false; this.items.code=[];
+            this.applyInterestSort('code');
+            this.updateMacy('code');
+            this.loadData('code'); this.loadSearchProducts();
         },
         submitCodeSearch(k){ this.codeQuery=String(k||'').trim(); this.selectedCodeCategory=''; this.items.code=[]; this.page.code=1; this.end.code=false; this.loadData('code'); this.loadSearchProducts(); },
         resetCodeCategory(){ this.selectedCodeCategory='all'; this.codeQuery=''; document.getElementById('code-search-input').value=''; toggleCodeSearchMode(false); this.items.code=[]; this.page.code=1; this.end.code=false; this.loadData('code'); this.loadSearchProducts(); },
 
-        openStoreItem(i){ if(i){ this.trackItem('store', i); const appId = i.id || i.app_id || i.appId; if(appId && typeof window.runApp==='function') window.runApp(appId); } },
-        openForumItem(i){ if(i){ this.trackItem('forum', i); window.location.href='https://isai.kr/view/'+i.id; } },
-        openNewsGate(i){ if(i?.link){ this.trackItem('news', i); window.location.href=`/news_gate/?u=${encodeURIComponent(i.link)}&t=${encodeURIComponent(i.cleanTitle||i.title||'News')}&s=${encodeURIComponent(i.snippet||'')}`; } },
-        openProduct(i){ if(i){ this.trackItem('products', i); if(i.link_url) window.open(i.link_url,'_blank','noopener'); } },
-        async openCodeItem(i){ if(!i)return; this.trackItem('code', i); if(i.id){ window.location.href='/play_run/?id='+i.id; return; } if(i.run_url)window.open(i.run_url,'_blank','noopener'); else if(i.gist_url)window.open(i.gist_url,'_blank','noopener'); },
+        openStoreItem(i){ if(i){ this.trackInterest('store', i); this.trackItem('store', i); const appId = i.id || i.app_id || i.appId; if(appId && typeof window.runApp==='function') window.runApp(appId); } },
+        openForumItem(i){ if(i){ this.trackInterest('forum', i); this.trackItem('forum', i); window.location.href='https://isai.kr/view/'+i.id; } },
+        openNewsGate(i){ if(i?.link){ this.trackInterest('news', i); this.trackItem('news', i); window.location.href=`/news_gate/?u=${encodeURIComponent(i.link)}&t=${encodeURIComponent(i.cleanTitle||i.title||'News')}&s=${encodeURIComponent(i.snippet||'')}`; } },
+        openProduct(i){ if(i){ this.trackInterest('products', i); this.trackItem('products', i); if(i.link_url) window.open(i.link_url,'_blank','noopener'); } },
+        async openCodeItem(i){ if(!i)return; this.trackInterest('code', i); this.trackItem('code', i); if(i.id){ window.location.href='/play_run/?id='+i.id; return; } if(i.run_url)window.open(i.run_url,'_blank','noopener'); else if(i.gist_url)window.open(i.gist_url,'_blank','noopener'); },
         openCodeComposer(){ window.scrollTo({top:0,behavior:'smooth'}); if(typeof window.setMode==='function')window.setMode('code'); },
         
         openGalleryItem(i){ 
             if(i){ 
+                this.trackInterest('gallery', i);
                 this.trackItem('gallery', i); 
                 fetch('re_store.php?action=increase_view&id='+i.id).catch(e=>{}); 
                 this.galleryModal.item = i; this.galleryModal.open = true;
@@ -510,6 +538,7 @@ document.addEventListener('alpine:init', () => {
 
         async openCharacterChat(i) {
             if(!i?.image_url) return; 
+            this.trackInterest('gallery', i);
             this.trackItem('gallery', i); 
             this.closeGalleryModal();
             document.body.classList.remove('is-store-menu-open');
@@ -525,7 +554,7 @@ document.addEventListener('alpine:init', () => {
         getSortedStoreCategories(){ return this.storeCategories.slice(); },
         getSortedCodeCategories(){ return this.codeCategories.slice(); },
 
-        refreshInterestLayout(t){ this.$nextTick(() => { this.updateMacy(t); setTimeout(() => { this.updateMacy(t); }, 150); }); },
+        refreshInterestLayout(t){ this.$nextTick(() => { this.applyInterestSort(t); this.updateMacy(t); setTimeout(() => { this.applyInterestSort(t); this.updateMacy(t); }, 150); }); },
         async warmupAiPool(t){ if(t!=='gallery'||this.warmupDone[t])return; this.warmupDone[t]=true; for(let i=0;i<2&&!this.end[t];i++)await this.loadData(t); this.refreshInterestLayout(t); this.initialInterestSortDone[t]=true; },
 
         // =========================================================================
@@ -672,6 +701,7 @@ document.addEventListener('alpine:init', () => {
                         const wasEmpty = this.items[t].length === 0;
                         const currentPage = this.page[t];
                         this.items[t] = [...this.items[t], ...newItems];
+                        this.applyInterestSort(t);
                         if(t==='news') this.end[t]=true; else this.page[t]++;
                         if (wasEmpty || currentPage <= 1) {
                             this.refreshInterestLayout(t);

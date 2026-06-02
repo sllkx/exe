@@ -559,6 +559,15 @@
         if (typeof setMode !== "function") return;
         const originalSetMode = setMode;
         setMode = function (mode) {
+            if (mode === "chat" && !window.ISAI_CHAT_PAGE) {
+                const redirectUrl = new URL("/chat.php", window.location.origin);
+                try {
+                    const cdnMode = new URL(window.location.href).searchParams.get("jsdelivr");
+                    if (cdnMode !== null) redirectUrl.searchParams.set("jsdelivr", cdnMode);
+                } catch (error) {}
+                window.location.href = redirectUrl.toString();
+                return;
+            }
             if (mode !== "voice" && typeof stopVoiceMode === "function") { try { stopVoiceMode(true); } catch (error) {} }
             const result = originalSetMode.apply(this, arguments);
             try { currentMode = mode; } catch (error) {} try { selectedMode = mode; } catch (error) {}

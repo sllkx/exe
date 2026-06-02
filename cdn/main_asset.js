@@ -1717,6 +1717,19 @@ window.startCharacterImageChat = function(id, imageUrl, prompt, personaName, per
             persona: normalizedPersona
         };
 
+        if (!window.ISAI_CHAT_PAGE) {
+            try {
+                sessionStorage.setItem('isai_chat_session_v1', JSON.stringify(charSession));
+            } catch (error) {}
+            const redirectUrl = new URL('/chat.php', window.location.origin);
+            try {
+                const cdnMode = new URL(window.location.href).searchParams.get('jsdelivr');
+                if (cdnMode !== null) redirectUrl.searchParams.set('jsdelivr', cdnMode);
+            } catch (error) {}
+            window.location.href = redirectUrl.toString();
+            return;
+        }
+
         if (typeof setCharacterChatSession === 'function') {
             setCharacterChatSession(charSession);
         }
@@ -1811,6 +1824,16 @@ window.startCharacterImageChat = function(id, imageUrl, prompt, personaName, per
         setTimeout(function () {
             if (typeof renderLocalModelTierSelector === "function") renderLocalModelTierSelector();
             if (typeof syncLocalModelTierVisibility === "function") syncLocalModelTierVisibility();
+
+            if (!window.INITIAL_CHAR_SESSION && window.ISAI_CHAT_PAGE) {
+                try {
+                    const queued = sessionStorage.getItem('isai_chat_session_v1');
+                    if (queued) {
+                        window.INITIAL_CHAR_SESSION = JSON.parse(queued);
+                        sessionStorage.removeItem('isai_chat_session_v1');
+                    }
+                } catch (error) {}
+            }
 
             if (window.INITIAL_CHAR_SESSION && window.INITIAL_CHAR_SESSION.active) {
                 window.startCharacterImageChat(

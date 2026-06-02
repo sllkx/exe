@@ -2008,7 +2008,7 @@ function getActiveLocalModelTier() {
     const userSetKey = getLocalModelTierUserSetKey();
     const hasUserSelection = localStorage.getItem(userSetKey) === "true";
     const storedTier = String(localStorage.getItem(storageKey) || "").trim().toLowerCase();
-    const defaultTier = profiles.middle ? "middle" : getDefaultLocalModelTier();
+    const defaultTier = getDefaultLocalModelTier();
     if (storedTier && profiles[storedTier] && hasUserSelection) return storedTier;
     localStorage.setItem(storageKey, defaultTier);
     return defaultTier;
@@ -2735,11 +2735,13 @@ function getLocalWasmLoadOptions(container, bar) {
     const preset = getLocalWasmSpeedPreset();
     const configuredCtx = Number(window.MODEL_CONFIG && window.MODEL_CONFIG.localWasmContextSize);
     const presetCtx = Number(preset && preset.maxSeqLen);
+    const threadCount = getLocalWasmThreadCount();
+    const policylessSingle = threadCount <= 1;
     const nCtx = Number.isFinite(configuredCtx) && configuredCtx > 0
         ? Math.floor(configuredCtx)
         : Math.min(Number.isFinite(presetCtx) && presetCtx > 0 ? presetCtx : 1024, 1024);
-    return {
-        n_threads: getLocalWasmThreadCount(),
+    const options = {
+        n_threads: threadCount,
         n_ctx: nCtx,
         progressCallback: ({ loaded, total }) => {
             if (container) container.classList.remove("hidden");
@@ -2748,6 +2750,12 @@ function getLocalWasmLoadOptions(container, bar) {
             }
         }
     };
+    if (policylessSingle) {
+        options.n_batch = 128;
+        options.flash_attn = true;
+    }
+    window.__ISAI_LOCAL_WASM_THREADS__ = threadCount;
+    return options;
 }
 
 function getLocalWasmSamplingOptions() {
@@ -2849,19 +2857,29 @@ async function runLocalInference(promptArr, callback, generationToken = null) {
     const runtime = localWasmEngine;
     const formatted = await runtime.formatChat(messages, true);
     if (!isCurrentLocalRun()) return;
+    const pieceDecoder = new TextDecoder();
     let streamedText = "";
     let resultText = "";
     try {
-        resultText = await runtime.createCompletion(formatted, {
+        const generationOptions = {
             sampling: getLocalWasmSamplingOptions(),
+            useCache: true,
             signal: localAbortController ? localAbortController.signal : undefined,
+            abortSignal: localAbortController ? localAbortController.signal : undefined,
             onNewToken: (token, piece, currentText) => {
                 if (!isCurrentLocalRun()) return false;
-                streamedText = String(currentText || streamedText);
+                if (piece instanceof Uint8Array) {
+                    streamedText += pieceDecoder.decode(piece);
+                } else if (piece) {
+                    streamedText += String(piece);
+                } else {
+                    streamedText = String(currentText || streamedText);
+                }
                 callback(streamedText, { replace: true });
                 return true;
             }
-        });
+        };
+        resultText = await runtime.createCompletion(formatted, generationOptions);
     } catch (error) {
         const abortLike = error && (error.name === "AbortError" || /abort|cancel|interrupt|terminate/i.test(String(error.message || "")));
         if (abortLike || !isCurrentLocalRun()) return;
